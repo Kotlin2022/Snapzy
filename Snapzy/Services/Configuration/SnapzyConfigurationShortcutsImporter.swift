@@ -364,6 +364,7 @@ extension QuickAccessActionSlot {
     switch self {
     case .centerTop: return "center_top"
     case .centerBottom: return "center_bottom"
+    case .centerTertiary: return "center_tertiary"
     case .topTrailing: return "top_trailing"
     case .topLeading: return "top_leading"
     case .bottomLeading: return "bottom_leading"

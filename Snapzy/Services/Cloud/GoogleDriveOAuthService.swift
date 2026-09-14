@@ -45,7 +45,7 @@ final class GoogleDriveOAuthService: @unchecked Sendable {
       }
     }
 
-    private class CheckedState: @unchecked Sendable {
+    private final class CheckedState: @unchecked Sendable {
       private var value = false
       private let lock = NSLock()
 

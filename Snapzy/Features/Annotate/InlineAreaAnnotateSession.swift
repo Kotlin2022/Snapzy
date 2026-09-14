@@ -38,6 +38,7 @@ enum InlineAreaKeyAction: Equatable {
   case cancel
   case finish
   case copyCurrentImage
+  case copyCurrentImagePath
   case copyMagnifierColor
   case setMoveModifierActive(Bool)
   case resetMoveModifierAndPassThrough
@@ -384,6 +385,9 @@ final class InlineAreaAnnotateSession: ObservableObject {
     case .copyCurrentImage:
       copyCurrentImage()
       return true
+    case .copyCurrentImagePath:
+      Task { await copyCurrentImagePath() }
+      return true
     case .copyMagnifierColor:
       // Only claim the key when the magnifier was actually active — otherwise this falls
       // through as `.passThrough` would have, so plain "C" typing elsewhere is unaffected.
@@ -463,6 +467,51 @@ final class InlineAreaAnnotateSession: ObservableObject {
     guard let image = AnnotateExporter.renderFinalImage(state: state) else { return }
     ClipboardHelper.copyImage(image)
     SoundManager.play("Pop")
+  }
+
+  /// Save the annotated capture, copy its absolute path as text, then dismiss like Done.
+  @discardableResult
+  func copyCurrentImagePath() async -> URL? {
+    guard phase == .annotating else { return nil }
+    if let selectionRect, let crop = cropImage(for: selectionRect) {
+      self.selectionRect = crop.localRect
+      state.replaceSourceImagePreservingAnnotations(crop.image)
+    }
+
+    guard let renderedImage = AnnotateExporter.renderFinalImage(state: state),
+          let cgImage = AnnotateExporter.bestCGImage(from: renderedImage) else {
+      complete(.failure(.captureFailed(L10n.ScreenCapture.failedToCropCapturedImage)))
+      return nil
+    }
+
+    // Skip captureCompletedSubject so default “copy file” doesn’t race the path string.
+    let result = await ScreenCaptureManager.shared.saveProcessedImage(
+      cgImage,
+      to: saveDirectory,
+      format: outputFormat,
+      scaleFactor: Self.imageScale(renderedImage),
+      emitCompletion: false,
+      context: context
+    )
+
+    guard case .success(let url) = result else {
+      complete(result)
+      return nil
+    }
+
+    persistCommittedSession(for: url)
+    complete(result)
+
+    // History / Quick Access still run; then re-assert plain path so Terminal can paste it.
+    await PostCaptureActionHandler.shared.handleScreenshotCapture(url: url)
+    ClipboardHelper.copyFilePath(url)
+    SoundManager.play("Pop")
+    AppToastManager.shared.show(
+      message: L10n.AnnotateUI.copiedFilePath(url.path),
+      style: .success,
+      duration: 3.5
+    )
+    return url
   }
 
   private func cropImage(for localRect: CGRect) -> InlineAreaCrop? {
@@ -696,6 +745,17 @@ final class InlineAreaAnnotateSession: ObservableObject {
     return event.keyCode == 8 || event.charactersIgnoringModifiers?.lowercased() == "c"
   }
 
+  /// ⌘⇧C — copy annotated capture file path as plain text.
+  nonisolated static func matchesCommandCopyPathShortcut(_ event: NSEvent) -> Bool {
+    guard event.type == .keyDown else { return false }
+    let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+    guard flags.contains(.command),
+          flags.contains(.shift),
+          !flags.contains(.control),
+          !flags.contains(.option) else { return false }
+    return event.keyCode == 8 || event.charactersIgnoringModifiers?.lowercased() == "c"
+  }
+
   nonisolated static func shouldHandleCommandCopyShortcut(
     _ event: NSEvent,
     isLocalEvent: Bool,
@@ -725,6 +785,10 @@ final class InlineAreaAnnotateSession: ObservableObject {
 
     if hasTextResponder {
       return matchesMoveModifierKey(event) ? .resetMoveModifierAndPassThrough : .passThrough
+    }
+
+    if matchesCommandCopyPathShortcut(event) {
+      return .copyCurrentImagePath
     }
 
     if shouldHandleCommandCopyShortcut(

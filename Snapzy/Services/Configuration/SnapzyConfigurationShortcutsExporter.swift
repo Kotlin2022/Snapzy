@@ -174,6 +174,7 @@ extension QuickAccessActionKind {
     switch self {
     case .copy: return "copy"
     case .saveOrOpen: return "save_or_open"
+    case .copyFilePath: return "copy_file_path"
     case .dismiss: return "dismiss"
     case .delete: return "delete"
     case .edit: return "edit"

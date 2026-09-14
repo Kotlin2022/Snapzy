@@ -707,6 +707,7 @@ final class QuickAccessCoreTests: XCTestCase {
     let configuredOrder: [QuickAccessActionKind] = [
       .copy,
       .saveOrOpen,
+      .copyFilePath,
       .dismiss,
       .delete,
       .edit,
@@ -716,7 +717,7 @@ final class QuickAccessCoreTests: XCTestCase {
 
     XCTAssertEqual(
       QuickAccessActionKind.contextMenuOrder(from: configuredOrder),
-      [.copy, .saveOrOpen, .edit, .uploadToCloud, .pinToScreen, .dismiss, .delete]
+      [.copy, .saveOrOpen, .copyFilePath, .edit, .uploadToCloud, .pinToScreen, .dismiss, .delete]
     )
   }
 

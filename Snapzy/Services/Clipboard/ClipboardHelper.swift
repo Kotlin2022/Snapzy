@@ -331,6 +331,21 @@ enum ClipboardHelper {
     }
   }
 
+  /// Copy a filesystem path as plain text so Terminal / editors can paste it.
+  static func copyFilePath(_ url: URL) {
+    let path = url.path
+    DiagnosticLogger.shared.log(
+      .info,
+      .clipboard,
+      "Copy file path",
+      context: ["file": url.lastPathComponent]
+    )
+    let pasteboard = NSPasteboard.general
+    pasteboard.clearContents()
+    pasteboard.setString(path, forType: .string)
+    logger.info("Clipboard: copied file path \(url.lastPathComponent)")
+  }
+
   private static func addFileURLFallbackRepresentations(
     to pasteboard: NSPasteboard,
     fileURL: URL

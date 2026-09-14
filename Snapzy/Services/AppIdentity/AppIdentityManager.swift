@@ -10,8 +10,11 @@ import Foundation
 import Security
 
 enum AppBundleIdentity {
-  static let releaseIdentifier = "com.trongduong.snapzy"
-  static let debugIdentifier = "com.trongduong.snapzy.debug"
+  static let releaseIdentifier = "com.local.snapzy"
+  static let debugIdentifier = "com.local.snapzy.debug"
+  /// Upstream Snapzy IDs — still accepted so permission/data paths remain usable when switching.
+  private static let legacyReleaseIdentifier = "com.trongduong.snapzy"
+  private static let legacyDebugIdentifier = "com.trongduong.snapzy.debug"
 
   #if DEBUG
   static let isDebugBuild = true
@@ -25,7 +28,10 @@ enum AppBundleIdentity {
     // Local development builds may retain the normal app identity and signing
     // certificate to preserve existing macOS capture permissions across rebuilds.
     // Release builds still require the release identity; arbitrary IDs are rejected.
-    identifier == releaseIdentifier || (debugBuild && identifier == debugIdentifier)
+    guard let identifier else { return false }
+    let allowedRelease = identifier == releaseIdentifier || identifier == legacyReleaseIdentifier
+    let allowedDebug = identifier == debugIdentifier || identifier == legacyDebugIdentifier
+    return allowedRelease || (debugBuild && allowedDebug)
   }
 }
 

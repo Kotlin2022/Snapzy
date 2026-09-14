@@ -339,6 +339,8 @@ struct QuickAccessCardView: View {
       return L10n.Common.copy
     case .saveOrOpen:
       return saveOrOpenActionTitle
+    case .copyFilePath:
+      return L10n.AnnotateUI.copyFilePath
     case .dismiss:
       return L10n.Common.close
     case .delete:
@@ -383,7 +385,7 @@ struct QuickAccessCardView: View {
     on _: QuickAccessActionSurface
   ) -> Bool {
     switch action {
-    case .copy, .dismiss, .edit:
+    case .copy, .copyFilePath, .dismiss, .edit:
       return true
     case .pinToScreen:
       return true
@@ -402,7 +404,7 @@ struct QuickAccessCardView: View {
       return !item.isVideo
     case .uploadToCloud:
       return shouldShowCloudButton && !alreadyUploadedToCloud && !isCloudUploading
-    case .copy, .saveOrOpen, .dismiss, .delete, .edit:
+    case .copy, .copyFilePath, .saveOrOpen, .dismiss, .delete, .edit:
       return true
     }
   }
@@ -415,6 +417,8 @@ struct QuickAccessCardView: View {
       copyItem()
     case .saveOrOpen:
       saveOrOpenItem()
+    case .copyFilePath:
+      copyFilePathItem()
     case .dismiss:
       dismissItem()
     case .delete:
@@ -453,6 +457,11 @@ struct QuickAccessCardView: View {
   private func copyItem() {
     QuickAccessSound.copy.play(reduceMotion: reduceMotion)
     manager.copyToClipboard(id: item.id)
+  }
+
+  private func copyFilePathItem() {
+    QuickAccessSound.copy.play(reduceMotion: reduceMotion)
+    manager.copyFilePath(id: item.id)
   }
 
   private func saveOrOpenItem() {
@@ -536,12 +545,12 @@ struct QuickAccessCardView: View {
         .fill(Color.black.opacity(0.4))
 
       // Action buttons with stagger effect
-      VStack(spacing: 8) {
+      VStack(spacing: 6) {
         ForEach(Array(QuickAccessActionSlot.centerSlots.enumerated()), id: \.element) { index, slot in
           if let action = overlayAction(in: slot) {
             staggeredButton(action: action, delay: index)
           } else {
-            Color.clear.frame(height: 28)
+            Color.clear.frame(height: 26)
           }
         }
       }

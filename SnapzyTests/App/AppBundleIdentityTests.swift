@@ -4,15 +4,19 @@ import XCTest
 @MainActor
 final class AppBundleIdentityTests: XCTestCase {
   func testDevelopmentBuildAcceptsNormalIdentityUsedByInstalledApp() async {
+    XCTAssertTrue(AppBundleIdentity.matches("com.local.snapzy", debugBuild: true))
     XCTAssertTrue(AppBundleIdentity.matches("com.trongduong.snapzy", debugBuild: true))
   }
 
   func testDevelopmentBuildAcceptsSeparateDebugIdentity() async {
+    XCTAssertTrue(AppBundleIdentity.matches("com.local.snapzy.debug", debugBuild: true))
     XCTAssertTrue(AppBundleIdentity.matches("com.trongduong.snapzy.debug", debugBuild: true))
   }
 
   func testReleaseBuildRequiresReleaseIdentity() async {
+    XCTAssertTrue(AppBundleIdentity.matches("com.local.snapzy", debugBuild: false))
     XCTAssertTrue(AppBundleIdentity.matches("com.trongduong.snapzy", debugBuild: false))
+    XCTAssertFalse(AppBundleIdentity.matches("com.local.snapzy.debug", debugBuild: false))
     XCTAssertFalse(AppBundleIdentity.matches("com.trongduong.snapzy.debug", debugBuild: false))
   }
 

@@ -26,6 +26,7 @@ final class QuickAccessActionShortcutStore: ObservableObject {
   static let defaultShortcuts: [QuickAccessActionKind: ShortcutConfig] = [
     .copy: ShortcutConfig(keyCode: UInt32(kVK_ANSI_C), modifiers: UInt32(cmdKey)),
     .saveOrOpen: ShortcutConfig(keyCode: UInt32(kVK_ANSI_S), modifiers: UInt32(cmdKey)),
+    .copyFilePath: ShortcutConfig(keyCode: UInt32(kVK_ANSI_C), modifiers: UInt32(cmdKey | shiftKey)),
     .edit: ShortcutConfig(keyCode: UInt32(kVK_ANSI_E), modifiers: UInt32(cmdKey)),
     .uploadToCloud: ShortcutConfig(keyCode: UInt32(kVK_ANSI_U), modifiers: UInt32(cmdKey)),
     .pinToScreen: ShortcutConfig(keyCode: UInt32(kVK_ANSI_P), modifiers: UInt32(cmdKey)),

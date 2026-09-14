@@ -20,6 +20,7 @@ enum QuickAccessActionSurface: Equatable {
 enum QuickAccessActionSlot: String, CaseIterable, Codable, Hashable, Identifiable {
   case centerTop
   case centerBottom
+  case centerTertiary
   case topTrailing
   case topLeading
   case bottomLeading
@@ -30,6 +31,7 @@ enum QuickAccessActionSlot: String, CaseIterable, Codable, Hashable, Identifiabl
   static let centerSlots: [QuickAccessActionSlot] = [
     .centerTop,
     .centerBottom,
+    .centerTertiary,
   ]
 
   static let cornerSlots: [QuickAccessActionSlot] = [
@@ -42,6 +44,7 @@ enum QuickAccessActionSlot: String, CaseIterable, Codable, Hashable, Identifiabl
   static let defaultAssignments: [QuickAccessActionSlot: QuickAccessActionKind] = [
     .centerTop: .copy,
     .centerBottom: .saveOrOpen,
+    .centerTertiary: .copyFilePath,
     .topTrailing: .dismiss,
     .topLeading: .delete,
     .bottomLeading: .edit,
@@ -58,6 +61,8 @@ enum QuickAccessActionSlot: String, CaseIterable, Codable, Hashable, Identifiabl
       return L10n.PreferencesQuickAccess.slotCenterTop
     case .centerBottom:
       return L10n.PreferencesQuickAccess.slotCenterBottom
+    case .centerTertiary:
+      return L10n.PreferencesQuickAccess.slotCenterTertiary
     case .topTrailing:
       return L10n.PreferencesQuickAccess.slotTopRight
     case .topLeading:
@@ -73,6 +78,7 @@ enum QuickAccessActionSlot: String, CaseIterable, Codable, Hashable, Identifiabl
 enum QuickAccessActionKind: String, CaseIterable, Codable, Hashable, Identifiable {
   case copy
   case saveOrOpen
+  case copyFilePath
   case dismiss
   case delete
   case edit
@@ -84,6 +90,7 @@ enum QuickAccessActionKind: String, CaseIterable, Codable, Hashable, Identifiabl
   static let defaultOrder: [QuickAccessActionKind] = [
     .copy,
     .saveOrOpen,
+    .copyFilePath,
     .dismiss,
     .delete,
     .edit,
@@ -95,7 +102,7 @@ enum QuickAccessActionKind: String, CaseIterable, Codable, Hashable, Identifiabl
 
   var displayStyle: QuickAccessActionDisplayStyle {
     switch self {
-    case .copy, .saveOrOpen:
+    case .copy, .saveOrOpen, .copyFilePath:
       return .primary
     case .dismiss, .delete, .edit, .uploadToCloud, .pinToScreen:
       return .corner
@@ -108,6 +115,8 @@ enum QuickAccessActionKind: String, CaseIterable, Codable, Hashable, Identifiabl
       return L10n.Common.copy
     case .saveOrOpen:
       return L10n.PreferencesQuickAccess.saveOrOpenAction
+    case .copyFilePath:
+      return L10n.AnnotateUI.copyFilePath
     case .dismiss:
       return L10n.Common.close
     case .delete:
@@ -134,7 +143,7 @@ enum QuickAccessActionKind: String, CaseIterable, Codable, Hashable, Identifiabl
     switch self {
     case .dismiss, .delete:
       return true
-    case .copy, .saveOrOpen, .edit, .uploadToCloud, .pinToScreen:
+    case .copy, .saveOrOpen, .copyFilePath, .edit, .uploadToCloud, .pinToScreen:
       return false
     }
   }
@@ -151,6 +160,8 @@ enum QuickAccessActionKind: String, CaseIterable, Codable, Hashable, Identifiabl
       return "doc.on.doc"
     case .saveOrOpen:
       return "square.and.arrow.down"
+    case .copyFilePath:
+      return "link"
     case .dismiss:
       return "xmark"
     case .delete:

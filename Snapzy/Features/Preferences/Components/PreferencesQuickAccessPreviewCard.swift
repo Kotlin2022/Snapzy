@@ -276,7 +276,7 @@ struct QuickAccessSettingsPreviewCard: View {
     switch slot {
     case .topLeading, .bottomLeading:
       -(cardWidth / 2 + popoverSideGap)
-    case .centerTop, .centerBottom, .topTrailing, .bottomTrailing:
+    case .centerTop, .centerBottom, .centerTertiary, .topTrailing, .bottomTrailing:
       cardWidth / 2 + popoverSideGap
     }
   }
@@ -284,9 +284,11 @@ struct QuickAccessSettingsPreviewCard: View {
   private func popoverYOffset(for slot: QuickAccessActionSlot) -> CGFloat {
     switch slot {
     case .centerTop:
-      -18
+      -28
     case .centerBottom:
-      18
+      0
+    case .centerTertiary:
+      28
     case .topLeading, .topTrailing:
       -(cardHeight / 2) + 20
     case .bottomLeading, .bottomTrailing:

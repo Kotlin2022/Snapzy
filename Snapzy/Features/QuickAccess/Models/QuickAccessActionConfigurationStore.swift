@@ -27,6 +27,26 @@ final class QuickAccessActionConfigurationStore: ObservableObject {
     slotAssignments = Self.normalizedSlotAssignments(
       from: defaults.dictionary(forKey: PreferencesKeys.quickAccessActionSlotAssignments) as? [String: String]
     )
+    migrateCopyFilePathIfNeeded()
+  }
+
+  /// Older preference blobs omit `copyFilePath`; enable it and place it under Copy / Open.
+  private func migrateCopyFilePathIfNeeded() {
+    let key = "quickAccess.actions.migrated.copyFilePath.v1"
+    guard !defaults.bool(forKey: key) else { return }
+
+    var enabled = enabledActions
+    enabled.insert(.copyFilePath)
+    enabledActions = enabled
+
+    if assignedSlot(for: .copyFilePath) == nil {
+      var assignments = slotAssignments
+      assignments[.centerTertiary] = .copyFilePath
+      slotAssignments = assignments
+    }
+
+    defaults.set(true, forKey: key)
+    save()
   }
 
   func orderedActions(includeDisabled: Bool) -> [QuickAccessActionKind] {

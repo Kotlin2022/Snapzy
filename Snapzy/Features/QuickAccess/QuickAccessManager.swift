@@ -1133,6 +1133,29 @@ final class QuickAccessManager: ObservableObject {
     SoundManager.play("Pop")
   }
 
+  /// Copy the item's absolute filesystem path as plain text, then dismiss the card.
+  func copyFilePath(id: UUID) {
+    guard let item = items.first(where: { $0.id == id }) else {
+      DiagnosticLogger.shared.log(
+        .warning,
+        .clipboard,
+        "Quick access copy file path missed item",
+        context: ["itemId": id.uuidString]
+      )
+      return
+    }
+
+    let path = item.url.path
+    ClipboardHelper.copyFilePath(item.url)
+    dismissCard(id: id)
+    SoundManager.play("Pop")
+    AppToastManager.shared.show(
+      message: L10n.AnnotateUI.copiedFilePath(path),
+      style: .success,
+      duration: 3.5
+    )
+  }
+
   /// Delete item from disk and remove from stack
   func deleteItem(id: UUID) {
     guard let item = items.first(where: { $0.id == id }) else {

@@ -245,6 +245,21 @@ final class InlineAreaAnnotateSessionTests: XCTestCase {
     )
   }
 
+  func testInlineKeyAction_commandShiftC_returnsCopyCurrentImagePath() throws {
+    let copyPath = try makeKeyEvent(keyCode: 8, characters: "c", flags: [.command, .shift])
+
+    XCTAssertEqual(
+      InlineAreaAnnotateSession.keyAction(
+        for: copyPath,
+        source: .local,
+        phase: .annotating,
+        hasTextResponder: false,
+        hasKeyWindow: true
+      ),
+      .copyCurrentImagePath
+    )
+  }
+
   func testInlineKeyAction_plainCDuringSelecting_returnsCopyMagnifierColor() throws {
     let copy = try makeKeyEvent(keyCode: 8, characters: "c", flags: [])
 
