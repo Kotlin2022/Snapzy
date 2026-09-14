@@ -3,10 +3,10 @@
 //  SnapzyTests
 //
 //  Characterization tests for watermark text updates, the three watermark
-//  styles and their per-style default rotation, and inheritance of remembered
-//  opacity/rotation into newly created watermark defaults. Persistence of
-//  remembered opacity/rotation across AnnotateState instances is covered in
-//  AnnotateCoreTests and is not duplicated here.
+//  styles and their per-style default rotation, inheritance of remembered
+//  opacity/rotation into newly created defaults, and persistence of watermark
+//  text/style/opacity/rotation/font across AnnotateState instances (including
+//  when editing a selected watermark).
 //
 
 import CoreGraphics

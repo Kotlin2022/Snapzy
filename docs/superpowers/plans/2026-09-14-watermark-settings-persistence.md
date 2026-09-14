@@ -26,7 +26,7 @@
 **Files:**
 - Modify: `SnapzyTests/Features/Annotate/AnnotateWatermarkTests.swift`
 
-- [ ] **Step 1: Append failing tests**
+- [x] **Step 1: Append failing tests**
 
 Add these tests at the end of `AnnotateWatermarkTests` (before the closing brace):
 
