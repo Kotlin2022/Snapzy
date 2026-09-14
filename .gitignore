@@ -7,12 +7,18 @@ sparkle_private_key.pem
 # Packages/**/*.build
 .build
 /build
+DerivedData/
+*.xcarchive
+*.dSYM
+*.profraw
+.DS_Store
 
 /tmp/
 
 # Secrets - never commit
 Snapzy/Config/Secrets.xcconfig
 *.xcuserstate
+**/xcuserdata/
 
 /plans
 
