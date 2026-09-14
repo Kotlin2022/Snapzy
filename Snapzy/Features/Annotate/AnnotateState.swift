@@ -4430,9 +4430,12 @@ final class AnnotateState: ObservableObject {
   }
 
   private func rememberWatermarkText(_ text: String) {
-    let sanitized = Self.sanitizedWatermarkText(text) ?? Self.defaultWatermarkText
-    watermarkText = sanitized
-    sharedAnnotationParameterDefaults.watermarkText = sanitized
+    // Keep the live field value as typed (including empty) so deleting the last
+    // character does not snap back to the default mid-edit.
+    watermarkText = text
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    let persisted = trimmed.isEmpty ? Self.defaultWatermarkText : trimmed
+    sharedAnnotationParameterDefaults.watermarkText = persisted
     persistSharedAnnotationParameterDefaults()
   }
 
@@ -5179,7 +5182,7 @@ final class AnnotateState: ObservableObject {
         })
         self.rememberWatermarkText(newText)
         if !selected.isEmpty {
-          selected.forEach { self.updateWatermarkText(id: $0.id, text: self.watermarkText) }
+          selected.forEach { self.updateWatermarkText(id: $0.id, text: newText) }
         }
       }
     )

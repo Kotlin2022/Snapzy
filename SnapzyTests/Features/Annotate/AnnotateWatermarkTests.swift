@@ -147,7 +147,21 @@ final class AnnotateWatermarkTests: XCTestCase {
     state.activateTool(.watermark)
     state.quickWatermarkTextBinding.wrappedValue = "   "
 
-    XCTAssertEqual(state.watermarkText, "Snapzy")
+    // Live editing keeps the typed value; only the persisted default falls back.
+    XCTAssertEqual(state.watermarkText, "   ")
+
+    let reloaded = makeAnnotateState(defaults: defaults)
+    XCTAssertEqual(reloaded.watermarkText, "Snapzy")
+  }
+
+  func testClearingLastWatermarkCharacterDoesNotSnapBackToDefault() {
+    let defaults = UserDefaultsFactory.make()
+    let state = makeAnnotateState(defaults: defaults)
+    state.activateTool(.watermark)
+    state.quickWatermarkTextBinding.wrappedValue = "A"
+    state.quickWatermarkTextBinding.wrappedValue = ""
+
+    XCTAssertEqual(state.watermarkText, "")
 
     let reloaded = makeAnnotateState(defaults: defaults)
     XCTAssertEqual(reloaded.watermarkText, "Snapzy")

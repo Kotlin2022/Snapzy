@@ -2488,6 +2488,11 @@ nonisolated enum L10n {
       defaultValue: "Center bottom",
       comment: "Quick access preview placement slot title"
     )
+    static let slotCenterTertiary = string(
+      "preferences-quick-access.slot-center-tertiary",
+      defaultValue: "Center below",
+      comment: "Quick access preview placement slot title for the third primary action under Copy and Open"
+    )
     static let slotTopRight = string(
       "preferences-quick-access.slot-top-right",
       defaultValue: "Top right",
@@ -5062,6 +5067,19 @@ nonisolated enum L10n {
       defaultValue: "Copy to clipboard",
       comment: "Tooltip shown for copying the annotated image to the clipboard"
     )
+    static let copyFilePath = string(
+      "annotate.copy-file-path",
+      defaultValue: "Copy file path",
+      comment: "Tooltip shown for copying the annotated screenshot file path as plain text"
+    )
+    static func copiedFilePath(_ path: String) -> String {
+      format(
+        "annotate.copied-file-path",
+        defaultValue: "Copied path:\n%@",
+        comment: "Toast shown after copying the annotated screenshot file path. %@ is the absolute filesystem path.",
+        path
+      )
+    }
     static let deleteScreenshotTitle = string(
       "annotate.delete-screenshot-title",
       defaultValue: "Delete Screenshot",
@@ -5553,6 +5571,11 @@ nonisolated enum L10n {
       "annotate.watermark-opacity",
       defaultValue: "Opacity",
       comment: "Label for watermark opacity controls"
+    )
+    static let clearWatermarkText = string(
+      "annotate.clear-watermark-text",
+      defaultValue: "Clear text",
+      comment: "Tooltip for clearing the watermark text field"
     )
     static let spotlightOpacity = string(
       "annotate.spotlight-opacity",

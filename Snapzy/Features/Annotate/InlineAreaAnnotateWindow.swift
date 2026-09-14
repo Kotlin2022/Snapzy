@@ -1230,8 +1230,8 @@ enum InlineAreaLayout {
   static let controlPanelOuterHorizontalInset: CGFloat = 12
   static let minimumSelectionSize: CGFloat = 24
   static let actionRailWidth: CGFloat = InlineAreaToolbarMetrics.iconButtonSize + InlineAreaToolbarMetrics.actionRailPadding * 2
-  static let actionRailHeight: CGFloat = InlineAreaToolbarMetrics.iconButtonSize * 4
-    + InlineAreaToolbarMetrics.actionRailSpacing * 4
+  static let actionRailHeight: CGFloat = InlineAreaToolbarMetrics.iconButtonSize * 5
+    + InlineAreaToolbarMetrics.actionRailSpacing * 5
     + InlineAreaToolbarMetrics.actionRailDividerHeight
     + InlineAreaToolbarMetrics.actionRailDividerVerticalPadding * 2
     + InlineAreaToolbarMetrics.actionRailPadding * 2
@@ -2874,17 +2874,33 @@ private struct InlineAreaTextFieldControl: View {
 
   var body: some View {
     InlineAreaPropertyGroup(title: title) {
-      TextField("", text: $text)
-        .textFieldStyle(.plain)
-        .font(.system(size: 11, weight: .medium))
-        .foregroundColor(InlineAreaChrome.primaryText)
-        .lineLimit(1)
-        .padding(.horizontal, 8)
-        .frame(width: 112, height: InlineAreaChrome.propertyControlHeight)
-        .background(
-          RoundedRectangle(cornerRadius: InlineAreaChrome.controlCornerRadius, style: .continuous)
-            .fill(InlineAreaChrome.itemBackground)
-        )
+      HStack(spacing: 0) {
+        TextField("", text: $text)
+          .textFieldStyle(.plain)
+          .font(.system(size: 11, weight: .medium))
+          .foregroundColor(InlineAreaChrome.primaryText)
+          .lineLimit(1)
+
+        if !text.isEmpty {
+          Button {
+            text = ""
+          } label: {
+            Image(systemName: "xmark.circle.fill")
+              .font(.system(size: 11, weight: .semibold))
+              .symbolRenderingMode(.palette)
+              .foregroundStyle(Color.secondary.opacity(0.9), Color.secondary.opacity(0.25))
+          }
+          .buttonStyle(.plain)
+          .help(L10n.AnnotateUI.clearWatermarkText)
+        }
+      }
+      .padding(.leading, 8)
+      .padding(.trailing, 6)
+      .frame(width: 112, height: InlineAreaChrome.propertyControlHeight)
+      .background(
+        RoundedRectangle(cornerRadius: InlineAreaChrome.controlCornerRadius, style: .continuous)
+          .fill(InlineAreaChrome.itemBackground)
+      )
     }
   }
 }
@@ -2936,6 +2952,13 @@ private struct InlineAreaActionRail: View {
         tooltip: L10n.Common.withShortcut(L10n.AnnotateUI.copyToClipboard, "⌘C")
       ) {
         session.copyCurrentImage()
+      }
+
+      InlineAreaIconButton(
+        icon: "link",
+        tooltip: L10n.Common.withShortcut(L10n.AnnotateUI.copyFilePath, "⌘⇧C")
+      ) {
+        Task { await session.copyCurrentImagePath() }
       }
     }
     .padding(InlineAreaToolbarMetrics.actionRailPadding)

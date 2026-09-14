@@ -1526,21 +1526,37 @@ private struct QuickWatermarkTextControl: View {
 
   var body: some View {
     QuickPropertiesGroup(title: L10n.Common.text, spacing: groupSpacing) {
-      TextField("", text: $text)
-        .textFieldStyle(.plain)
-        .font(Typography.labelSmall)
-        .foregroundColor(SidebarColors.labelPrimary)
-        .lineLimit(1)
-        .padding(.horizontal, 8)
-        .frame(height: 24)
-        .background(
-          RoundedRectangle(cornerRadius: 7)
-            .fill(SidebarColors.itemDefault)
-        )
-        .overlay(
-          RoundedRectangle(cornerRadius: 7)
-            .stroke(Color.secondary.opacity(0.14), lineWidth: 1)
-        )
+      HStack(spacing: 0) {
+        TextField("", text: $text)
+          .textFieldStyle(.plain)
+          .font(Typography.labelSmall)
+          .foregroundColor(SidebarColors.labelPrimary)
+          .lineLimit(1)
+
+        if !text.isEmpty {
+          Button {
+            text = ""
+          } label: {
+            Image(systemName: "xmark.circle.fill")
+              .font(.system(size: 11, weight: .semibold))
+              .symbolRenderingMode(.palette)
+              .foregroundStyle(Color.secondary.opacity(0.85), Color.secondary.opacity(0.22))
+          }
+          .buttonStyle(.plain)
+          .help(L10n.AnnotateUI.clearWatermarkText)
+        }
+      }
+      .padding(.leading, 8)
+      .padding(.trailing, 6)
+      .frame(height: 24)
+      .background(
+        RoundedRectangle(cornerRadius: 7)
+          .fill(SidebarColors.itemDefault)
+      )
+      .overlay(
+        RoundedRectangle(cornerRadius: 7)
+          .stroke(Color.secondary.opacity(0.14), lineWidth: 1)
+      )
     }
   }
 }
