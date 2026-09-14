@@ -58,6 +58,10 @@ enum PreferencesKeys {
 
   // Screenshot
   static let screenshotFormat = "screenshot.format"
+  static let screenshotBorderEnabled = "screenshot.borderEnabled"
+  static let screenshotBorderColor = "screenshot.borderColor"
+  static let screenshotBorderWidth = "screenshot.borderWidth"
+  static let screenshotBorderCornerRadius = "screenshot.borderCornerRadius"
   static let screenshotFileNameTemplate = "screenshot.fileNameTemplate"
   static let screenshotIncludeOwnApp = "screenshot.includeOwnApp"
   static let screenshotShowCursor = "screenshot.showCursor"

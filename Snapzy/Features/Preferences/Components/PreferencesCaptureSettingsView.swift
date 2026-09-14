@@ -50,6 +50,9 @@ struct CaptureSettingsView: View {
   @AppStorage(PreferencesKeys.screenshotShowMagnifierColorPanel) private var showMagnifierColorPanel = true
 
   @AppStorage(PreferencesKeys.screenshotFormat) private var screenshotFormat = "png"
+  @AppStorage(PreferencesKeys.screenshotBorderEnabled) private var screenshotBorderEnabled = false
+  @AppStorage(PreferencesKeys.screenshotBorderWidth) private var screenshotBorderWidth: Double = 12
+  @AppStorage(PreferencesKeys.screenshotBorderCornerRadius) private var screenshotBorderCornerRadius: Double = 16
   @AppStorage(PreferencesKeys.scrollingCaptureShowHints) private var scrollingCaptureShowHints = true
   @AppStorage(PreferencesKeys.backgroundCutoutAutoCropEnabled) private var backgroundCutoutAutoCropEnabled = true
   @AppStorage(PreferencesKeys.ocrSuccessNotificationEnabled) private var ocrSuccessNotification = true
@@ -106,6 +109,24 @@ struct CaptureSettingsView: View {
         let nsColor = NSColor(newColor)
         if let data = try? NSKeyedArchiver.archivedData(withRootObject: nsColor, requiringSecureCoding: true) {
           UserDefaults.standard.set(data, forKey: PreferencesKeys.mouseHighlightColor)
+        }
+      }
+    )
+  }
+
+  private var screenshotBorderSwiftColor: Binding<Color> {
+    Binding<Color>(
+      get: {
+        if let data = UserDefaults.standard.data(forKey: PreferencesKeys.screenshotBorderColor),
+           let nsColor = try? NSKeyedUnarchiver.unarchivedObject(ofClass: NSColor.self, from: data) {
+          return Color(nsColor: nsColor)
+        }
+        return Color(nsColor: ScreenshotBorderSettings.defaultColor)
+      },
+      set: { newColor in
+        let nsColor = NSColor(newColor)
+        if let data = try? NSKeyedArchiver.archivedData(withRootObject: nsColor, requiringSecureCoding: true) {
+          UserDefaults.standard.set(data, forKey: PreferencesKeys.screenshotBorderColor)
         }
       }
     )
@@ -353,6 +374,69 @@ struct CaptureSettingsView: View {
                   .fixedSize(horizontal: false, vertical: true)
               }
               .padding(.vertical, 4)
+            }
+          }
+        }
+
+        if selectedPane == .screenshot {
+          Section(L10n.PreferencesCapture.screenshotBorderSection) {
+            SettingRow(
+              icon: "rectangle.dashed",
+              title: L10n.PreferencesCapture.screenshotBorderEnabledTitle,
+              description: L10n.PreferencesCapture.screenshotBorderEnabledDescription
+            ) {
+              Toggle("", isOn: $screenshotBorderEnabled)
+                .labelsHidden()
+            }
+
+            if screenshotBorderEnabled {
+              SettingRow(
+                icon: "paintpalette",
+                title: L10n.PreferencesCapture.screenshotBorderColorTitle,
+                description: L10n.PreferencesCapture.screenshotBorderColorDescription
+              ) {
+                ColorPicker("", selection: screenshotBorderSwiftColor, supportsOpacity: false)
+                  .labelsHidden()
+              }
+
+              SettingRow(
+                icon: "arrow.left.and.right",
+                title: L10n.PreferencesCapture.screenshotBorderWidthTitle,
+                description: L10n.PreferencesCapture.screenshotBorderWidthDescription(Int(screenshotBorderWidth))
+              ) {
+                Slider(
+                  value: $screenshotBorderWidth.stepped(by: 1, in: 1 ... Double(ScreenshotBorderSettings.maxDimensionPoints)),
+                  in: 1 ... Double(ScreenshotBorderSettings.maxDimensionPoints)
+                )
+                .frame(width: 140)
+              }
+
+              SettingRow(
+                icon: "button.roundedtop.horizontal",
+                title: L10n.PreferencesCapture.screenshotBorderCornerRadiusTitle,
+                description: L10n.PreferencesCapture.screenshotBorderCornerRadiusDescription(
+                  Int(screenshotBorderCornerRadius)
+                )
+              ) {
+                Slider(
+                  value: $screenshotBorderCornerRadius.stepped(
+                    by: 1,
+                    in: 0 ... Double(ScreenshotBorderSettings.maxDimensionPoints)
+                  ),
+                  in: 0 ... Double(ScreenshotBorderSettings.maxDimensionPoints)
+                )
+                .frame(width: 140)
+              }
+
+              HStack {
+                Spacer()
+                Button(L10n.Common.resetToDefault) {
+                  resetScreenshotBorderDefaults()
+                }
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+                .buttonStyle(.plain)
+              }
             }
           }
         }
@@ -931,6 +1015,12 @@ struct CaptureSettingsView: View {
     mouseHighlightRippleCount = MouseHighlightConfiguration.defaultRippleCount
     mouseHighlightOpacity = MouseHighlightConfiguration.defaultHighlightOpacity
     UserDefaults.standard.removeObject(forKey: PreferencesKeys.mouseHighlightColor)
+  }
+
+  private func resetScreenshotBorderDefaults() {
+    screenshotBorderWidth = Double(ScreenshotBorderSettings.defaultWidthPoints)
+    screenshotBorderCornerRadius = Double(ScreenshotBorderSettings.defaultCornerRadiusPoints)
+    UserDefaults.standard.removeObject(forKey: PreferencesKeys.screenshotBorderColor)
   }
 
   private func resetKeystrokeDefaults() {

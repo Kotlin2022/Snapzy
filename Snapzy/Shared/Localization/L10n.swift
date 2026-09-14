@@ -2803,6 +2803,57 @@ nonisolated enum L10n {
       defaultValue: "Output format for captured screenshots",
       comment: "Capture preferences setting description"
     )
+    static let screenshotBorderSection = string(
+      "preferences-capture.screenshot-border-section",
+      defaultValue: "Screenshot Border",
+      comment: "Capture preferences section title for screenshot border"
+    )
+    static let screenshotBorderEnabledTitle = string(
+      "preferences-capture.screenshot-border-enabled-title",
+      defaultValue: "Add Border",
+      comment: "Capture preferences toggle title for screenshot border"
+    )
+    static let screenshotBorderEnabledDescription = string(
+      "preferences-capture.screenshot-border-enabled-description",
+      defaultValue: "Expand each screenshot with a colored border before saving, copying, or opening Annotate",
+      comment: "Capture preferences toggle description for screenshot border"
+    )
+    static let screenshotBorderColorTitle = string(
+      "preferences-capture.screenshot-border-color-title",
+      defaultValue: "Border Color",
+      comment: "Capture preferences setting title for screenshot border color"
+    )
+    static let screenshotBorderColorDescription = string(
+      "preferences-capture.screenshot-border-color-description",
+      defaultValue: "Color of the border around screenshots",
+      comment: "Capture preferences setting description for screenshot border color"
+    )
+    static let screenshotBorderWidthTitle = string(
+      "preferences-capture.screenshot-border-width-title",
+      defaultValue: "Border Thickness",
+      comment: "Capture preferences setting title for screenshot border thickness"
+    )
+    static func screenshotBorderWidthDescription(_ points: Int) -> String {
+      format(
+        "preferences-capture.screenshot-border-width-description",
+        defaultValue: "Thickness of the border (%d pt)",
+        comment: "Capture preferences setting description for screenshot border thickness. %d is points.",
+        points
+      )
+    }
+    static let screenshotBorderCornerRadiusTitle = string(
+      "preferences-capture.screenshot-border-corner-radius-title",
+      defaultValue: "Corner Radius",
+      comment: "Capture preferences setting title for screenshot border corner radius"
+    )
+    static func screenshotBorderCornerRadiusDescription(_ points: Int) -> String {
+      format(
+        "preferences-capture.screenshot-border-corner-radius-description",
+        defaultValue: "Roundness of the bordered screenshot (%d pt)",
+        comment: "Capture preferences setting description for screenshot border corner radius. %d is points.",
+        points
+      )
+    }
     static let webpWarning = string(
       "preferences-capture.webp-warning",
       defaultValue: "WebP encoding is slower than other formats. For faster capture speed, consider using PNG or JPEG.",

@@ -1221,6 +1221,13 @@ final class ScreenCaptureManager: ObservableObject {
 
     logger.info("Saving capture to \(scopedDirectory.lastPathComponent)/\(baseName).\(fileExtension)")
 
+    let resolvedScaleFactor = max(scaleFactor ?? 2, 1)
+    let borderedImage = ScreenshotBorderApplier.applyIfNeeded(
+      image,
+      settings: ScreenshotBorderSettings.load(),
+      scaleFactor: resolvedScaleFactor
+    )
+
     // Capture format properties before entering detached task
     let utType = format.utType
 
@@ -1245,7 +1252,7 @@ final class ScreenCaptureManager: ObservableObject {
 
       if isWebP {
         // WebP: use WebPEncoder (cwebp CLI) since ImageIO doesn't support WebP encoding
-        guard WebPEncoderService.write(image, to: fileURL) else {
+        guard WebPEncoderService.write(borderedImage, to: fileURL) else {
           return .failure(.saveFailed(L10n.ScreenCapture.webpEncodingFailed))
         }
       } else {
@@ -1261,7 +1268,7 @@ final class ScreenCaptureManager: ObservableObject {
           return .failure(.saveFailed(L10n.ScreenCapture.couldNotCreateImageDestination))
         }
 
-        CGImageDestinationAddImage(destination, image, destinationProperties)
+        CGImageDestinationAddImage(destination, borderedImage, destinationProperties)
 
         guard CGImageDestinationFinalize(destination) else {
           return .failure(.saveFailed(L10n.ScreenCapture.failedToWriteImageToDisk))
