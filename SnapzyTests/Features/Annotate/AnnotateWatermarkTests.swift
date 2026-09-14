@@ -130,4 +130,95 @@ final class AnnotateWatermarkTests: XCTestCase {
     XCTAssertEqual(properties.opacity, 0.5, accuracy: 0.0001)
     XCTAssertEqual(properties.rotationDegrees, -10, accuracy: 0.0001)
   }
+
+  func testWatermarkTextPersistsAcrossAnnotateStateInstances() {
+    let defaults = UserDefaultsFactory.make()
+    let firstState = makeAnnotateState(defaults: defaults)
+    firstState.activateTool(.watermark)
+    firstState.quickWatermarkTextBinding.wrappedValue = "Confidential"
+
+    let reloaded = makeAnnotateState(defaults: defaults)
+    XCTAssertEqual(reloaded.watermarkText, "Confidential")
+  }
+
+  func testBlankWatermarkTextFallsBackToSnapzyWhenRemembered() {
+    let defaults = UserDefaultsFactory.make()
+    let state = makeAnnotateState(defaults: defaults)
+    state.activateTool(.watermark)
+    state.quickWatermarkTextBinding.wrappedValue = "   "
+
+    XCTAssertEqual(state.watermarkText, "Snapzy")
+
+    let reloaded = makeAnnotateState(defaults: defaults)
+    XCTAssertEqual(reloaded.watermarkText, "Snapzy")
+  }
+
+  func testSelectedWatermarkTextChangeIsRememberedForNextCreate() throws {
+    let defaults = UserDefaultsFactory.make()
+    let state = makeAnnotateState(defaults: defaults)
+    let annotation = makeWatermarkAnnotation("Snapzy")
+    state.annotations = [annotation]
+    // activateTool deselects non-selection tools; select afterward.
+    state.activateTool(.watermark)
+    state.selectedAnnotationId = annotation.id
+
+    state.quickWatermarkTextBinding.wrappedValue = "Draft"
+
+    let updated = try XCTUnwrap(state.annotations.first)
+    guard case .watermark(let text) = updated.type else {
+      return XCTFail("Expected watermark annotation, got \(updated.type)")
+    }
+    XCTAssertEqual(text, "Draft")
+    XCTAssertEqual(state.watermarkText, "Draft")
+
+    let reloaded = makeAnnotateState(defaults: defaults)
+    XCTAssertEqual(reloaded.watermarkText, "Draft")
+  }
+
+  func testSelectedWatermarkStyleOpacityRotationAreRemembered() throws {
+    let defaults = UserDefaultsFactory.make()
+    let state = makeAnnotateState(defaults: defaults)
+    let annotation = makeWatermarkAnnotation()
+    state.annotations = [annotation]
+    state.activateTool(.watermark)
+    state.selectedAnnotationId = annotation.id
+
+    state.setActiveWatermarkStyle(.single)
+    state.quickWatermarkOpacityBinding.wrappedValue = 0.55
+    state.quickWatermarkRotationBinding.wrappedValue = -8
+
+    let selected = try XCTUnwrap(state.annotations.first)
+    XCTAssertEqual(selected.properties.watermarkStyle, .single)
+    XCTAssertEqual(selected.properties.opacity, 0.55, accuracy: 0.0001)
+    XCTAssertEqual(selected.properties.rotationDegrees, -8, accuracy: 0.0001)
+
+    let properties = state.annotationCreationProperties(for: .watermark)
+    XCTAssertEqual(properties.watermarkStyle, .single)
+    XCTAssertEqual(properties.opacity, 0.55, accuracy: 0.0001)
+    XCTAssertEqual(properties.rotationDegrees, -8, accuracy: 0.0001)
+
+    let reloaded = makeAnnotateState(defaults: defaults)
+    let reloadedProperties = reloaded.annotationCreationProperties(for: .watermark)
+    XCTAssertEqual(reloadedProperties.watermarkStyle, .single)
+    XCTAssertEqual(reloadedProperties.opacity, 0.55, accuracy: 0.0001)
+    XCTAssertEqual(reloadedProperties.rotationDegrees, -8, accuracy: 0.0001)
+  }
+
+  func testSelectedWatermarkFontSizeIsRemembered() throws {
+    let defaults = UserDefaultsFactory.make()
+    let state = makeAnnotateState(defaults: defaults)
+    let annotation = makeWatermarkAnnotation()
+    state.annotations = [annotation]
+    state.activateTool(.watermark)
+    state.selectedAnnotationId = annotation.id
+
+    state.quickTextFontSizeBinding.wrappedValue = 44
+
+    let selected = try XCTUnwrap(state.annotations.first)
+    XCTAssertEqual(selected.properties.fontSize, 44)
+    XCTAssertEqual(state.annotationCreationProperties(for: .watermark).fontSize, 44)
+
+    let reloaded = makeAnnotateState(defaults: defaults)
+    XCTAssertEqual(reloaded.annotationCreationProperties(for: .watermark).fontSize, 44)
+  }
 }
