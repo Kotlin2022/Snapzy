@@ -89,6 +89,7 @@ final class AnnotateState: ObservableObject {
     var fontSize: CGFloat?
     var watermarkOpacity: CGFloat?
     var watermarkRotationDegrees: CGFloat?
+    var watermarkText: String?
     var spotlightCornerRadius: CGFloat?
     var arrowStyle: String?
     var arrowType: String?
@@ -96,6 +97,14 @@ final class AnnotateState: ObservableObject {
     var arrowStartHead: String?
     var arrowEndHead: String?
     var lineStyle: String?
+  }
+
+  private static let defaultWatermarkText = "Snapzy"
+
+  private static func sanitizedWatermarkText(_ text: String?) -> String? {
+    guard let text else { return nil }
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? defaultWatermarkText : trimmed
   }
 
   private struct PersistedAnnotationProperties: Codable {
@@ -4136,13 +4145,13 @@ final class AnnotateState: ObservableObject {
           watermarkStyle: style
         )
       }
-    } else {
-      updateDefaultAnnotationProperties(
-        for: .watermark,
-        rotationDegrees: rotationDegrees,
-        watermarkStyle: style
-      )
     }
+    updateDefaultAnnotationProperties(
+      for: .watermark,
+      rotationDegrees: rotationDegrees,
+      watermarkStyle: style
+    )
+    rememberWatermarkRotation(rotationDegrees)
   }
 
   private func loadSharedAnnotationColor() {
@@ -4171,6 +4180,10 @@ final class AnnotateState: ObservableObject {
     else { return }
 
     sharedAnnotationParameterDefaults = sanitizedSharedAnnotationParameterDefaults(decoded)
+
+    if let savedText = sharedAnnotationParameterDefaults.watermarkText {
+      watermarkText = savedText
+    }
 
     if let savedStyleRaw = sharedAnnotationParameterDefaults.arrowStyle,
        let savedStyle = ArrowStyle(rawValue: savedStyleRaw) {
@@ -4208,12 +4221,14 @@ final class AnnotateState: ObservableObject {
       fontSize: defaults.fontSize.map { min(max($0, 12), 72) },
       watermarkOpacity: defaults.watermarkOpacity.map(AnnotationProperties.clampedOpacity(_:)),
       watermarkRotationDegrees: defaults.watermarkRotationDegrees.map(AnnotationProperties.clampedRotationDegrees(_:)),
+      watermarkText: Self.sanitizedWatermarkText(defaults.watermarkText),
       spotlightCornerRadius: defaults.spotlightCornerRadius.map { max(0, $0) },
       arrowStyle: defaults.arrowStyle,
       arrowType: defaults.arrowType,
       arrowBendDirection: defaults.arrowBendDirection,
       arrowStartHead: defaults.arrowStartHead,
-      arrowEndHead: defaults.arrowEndHead
+      arrowEndHead: defaults.arrowEndHead,
+      lineStyle: defaults.lineStyle
     )
   }
 
@@ -4412,6 +4427,13 @@ final class AnnotateState: ObservableObject {
       for: .watermark,
       rotationDegrees: AnnotationProperties.clampedRotationDegrees(rotationDegrees)
     )
+  }
+
+  private func rememberWatermarkText(_ text: String) {
+    let sanitized = Self.sanitizedWatermarkText(text) ?? Self.defaultWatermarkText
+    watermarkText = sanitized
+    sharedAnnotationParameterDefaults.watermarkText = sanitized
+    persistSharedAnnotationParameterDefaults()
   }
 
   private func applySharedAnnotationColorToToolDefaults(_ color: Color) {
@@ -5046,7 +5068,7 @@ final class AnnotateState: ObservableObject {
       set: { [weak self] newSize in
         guard let self else { return }
         let clampedSize = min(max(newSize, 12), 72)
-        if !self.updateQuickSelectionProperties(
+        _ = self.updateQuickSelectionProperties(
           fontSize: clampedSize,
           recordsUndo: true,
           matching: {
@@ -5057,9 +5079,8 @@ final class AnnotateState: ObservableObject {
               return false
             }
           }
-        ) {
-          self.rememberAnnotationFontSize(clampedSize, for: self.quickPropertiesTool)
-        }
+        )
+        self.rememberAnnotationFontSize(clampedSize, for: self.quickPropertiesTool)
       }
     )
   }
@@ -5156,10 +5177,9 @@ final class AnnotateState: ObservableObject {
           if case .watermark = $0 { return true }
           return false
         })
-        if selected.isEmpty {
-          self.watermarkText = newText
-        } else {
-          selected.forEach { self.updateWatermarkText(id: $0.id, text: newText) }
+        self.rememberWatermarkText(newText)
+        if !selected.isEmpty {
+          selected.forEach { self.updateWatermarkText(id: $0.id, text: self.watermarkText) }
         }
       }
     )
@@ -5189,16 +5209,15 @@ final class AnnotateState: ObservableObject {
       set: { [weak self] newOpacity in
         guard let self else { return }
         let clampedOpacity = AnnotationProperties.clampedOpacity(newOpacity)
-        if !self.updateQuickSelectionProperties(
+        _ = self.updateQuickSelectionProperties(
           opacity: clampedOpacity,
           recordsUndo: true,
           matching: {
             if case .watermark = $0 { return true }
             return false
           }
-        ) {
-          self.rememberWatermarkOpacity(clampedOpacity)
-        }
+        )
+        self.rememberWatermarkOpacity(clampedOpacity)
       }
     )
   }
@@ -5216,16 +5235,15 @@ final class AnnotateState: ObservableObject {
       set: { [weak self] newRotation in
         guard let self else { return }
         let clampedRotation = AnnotationProperties.clampedRotationDegrees(newRotation)
-        if !self.updateQuickSelectionProperties(
+        _ = self.updateQuickSelectionProperties(
           rotationDegrees: clampedRotation,
           recordsUndo: true,
           matching: {
             if case .watermark = $0 { return true }
             return false
           }
-        ) {
-          self.rememberWatermarkRotation(clampedRotation)
-        }
+        )
+        self.rememberWatermarkRotation(clampedRotation)
       }
     )
   }
