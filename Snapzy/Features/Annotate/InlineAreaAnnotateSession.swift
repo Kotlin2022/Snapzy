@@ -117,7 +117,15 @@ final class InlineAreaAnnotateSession: ObservableObject {
   /// different, lower-level mechanism unaffected by that quirk. Session activates the app via
   /// `NSApp.activate` at start, so — unlike live-passthrough capture — this doesn't need
   /// `BackgroundCursorControl`'s background-cursor-control workaround.
+  ///
+  /// Remote-control agents (UU Remote, etc.) are the exception: they often move the pointer
+  /// without delivering SwiftUI hover/drag events, so hiding the cursor + relying on those
+  /// events freezes the drawn crosshair. Skip the hide and poll `NSEvent.mouseLocation`
+  /// instead (`startRemoteCompatPointerPollingIfNeeded`).
   private var cursorHider = LivePassthroughCursorHider()
+  private let hidesSystemCursorDuringSelection: Bool
+  private var remoteCompatPointerTimer: Timer?
+  private var remoteCompatLeftWasPressed = false
 
   init(
     primaryDisplayID: CGDirectDisplayID,
@@ -151,14 +159,27 @@ final class InlineAreaAnnotateSession: ObservableObject {
     self.state.onToolActivated = { tool in
       AnnotateToolPreference.remember(tool, userDefaults: defaults)
     }
+    let remoteConflict = LivePassthroughRemoteControlConflict.isPresent()
+    hidesSystemCursorDuringSelection = LivePassthroughRemoteControlConflict
+      .shouldHideSystemCursorDuringSelection(hasRemoteControlConflict: remoteConflict)
     self.stateChangeCancellable = state.objectWillChange.sink { [weak self] _ in
       Task { @MainActor in
         self?.objectWillChange.send()
       }
     }
     // Session always starts in `.selecting` — hide the real cursor for every display up
-    // front; `beginAnnotating(with:)` shows it again once selection ends.
-    cursorHider.hide(displayIDs: Set(displays.map(\.displayID)))
+    // front (unless a remote-control agent is fighting event delivery); `beginAnnotating(with:)`
+    // shows it again once selection ends.
+    if hidesSystemCursorDuringSelection {
+      cursorHider.hide(displayIDs: Set(displays.map(\.displayID)))
+    } else {
+      DiagnosticLogger.shared.log(
+        .info,
+        .capture,
+        "Inline area annotate: remote-control agent conflict — keeping system cursor, polling pointer"
+      )
+      startRemoteCompatPointerPollingIfNeeded()
+    }
     startWindowSelectionQuery(prefetchedContentTask: prefetchedContentTask, excludeOwnApplication: excludeOwnApplication)
     if autoDetectElementUnderCursor {
       SmartElementQueryService.shared.ensureAccessibilityPermission()
@@ -169,6 +190,62 @@ final class InlineAreaAnnotateSession: ObservableObject {
   deinit {
     windowSelectionTask?.cancel()
     SmartElementQueryService.shared.cancelPendingQueries()
+  }
+
+  /// Poll system pointer position while selecting under a remote-control agent.
+  /// SwiftUI hover/drag often starve when UU (etc.) injects motion without AppKit hover
+  /// events — keep `selectionPointerLocation` fresh and drive press/drag/release from
+  /// `NSEvent.pressedMouseButtons` so the crosshair and selection rect still move.
+  private func startRemoteCompatPointerPollingIfNeeded() {
+    guard remoteCompatPointerTimer == nil else { return }
+    let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+      MainActor.assumeIsolated {
+        self?.handleRemoteCompatPointerTick()
+      }
+    }
+    RunLoop.main.add(timer, forMode: .common)
+    remoteCompatPointerTimer = timer
+  }
+
+  private func stopRemoteCompatPointerPolling() {
+    remoteCompatPointerTimer?.invalidate()
+    remoteCompatPointerTimer = nil
+    remoteCompatLeftWasPressed = false
+  }
+
+  private func handleRemoteCompatPointerTick() {
+    guard phase == .selecting, !didComplete else { return }
+    let screenPoint = NSEvent.mouseLocation
+    let desktopPoint = localDesktopPoint(for: screenPoint)
+    selectionPointerLocation = desktopPoint
+    updateHoveredWindow(atScreenPoint: screenPoint)
+
+    // Button-state polling backs SwiftUI gestures when remote injection skips AppKit
+    // mouse-dragged delivery — same symptom as the frozen crosshair.
+    let leftPressed = NSEvent.pressedMouseButtons & (1 << 0) != 0
+    if leftPressed {
+      if selectionStartPoint == nil {
+        beginSelection(at: desktopPoint)
+      } else {
+        updateSelection(to: desktopPoint)
+      }
+    } else if remoteCompatLeftWasPressed, selectionStartPoint != nil {
+      let tinySelection = (selectionRect?.width ?? 0) <= 5 || (selectionRect?.height ?? 0) <= 5
+      if tinySelection, let smartElementRect = hoveredSmartElementRect {
+        selectionStartPoint = nil
+        selectionRect = nil
+        removeSelectionMonitor()
+        selectElement(atScreenRect: smartElementRect)
+      } else if tinySelection, let candidate = hoveredWindowCandidate {
+        selectionStartPoint = nil
+        selectionRect = nil
+        removeSelectionMonitor()
+        selectWindow(candidate)
+      } else {
+        endSelection(at: desktopPoint)
+      }
+    }
+    remoteCompatLeftWasPressed = leftPressed
   }
 
   private func subscribeToSmartElementHighlights() {
@@ -326,6 +403,7 @@ final class InlineAreaAnnotateSession: ObservableObject {
     state.loadImage(crop.image, url: nil)
     state.selectedTool = AnnotateToolPreference.initialTool(userDefaults: defaults)
     phase = .annotating
+    stopRemoteCompatPointerPolling()
     cursorHider.showAll()
   }
 
@@ -684,6 +762,7 @@ final class InlineAreaAnnotateSession: ObservableObject {
     selectionPointerLocation = nil
     removeKeyMonitors()
     removeSelectionMonitor()
+    stopRemoteCompatPointerPolling()
     frozenSession.invalidate()
 
     // Restore cursor before closing windows — the inline overlay uses a

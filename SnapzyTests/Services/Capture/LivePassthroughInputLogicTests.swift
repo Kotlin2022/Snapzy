@@ -276,4 +276,71 @@ final class LivePassthroughInputLogicTests: XCTestCase {
 
     XCTAssertEqual(intervals, [0])
   }
+
+  // MARK: - Remote-control conflict gate
+
+  func testShouldUseLivePassthrough_enabledScreenshotWithoutConflict() {
+    XCTAssertTrue(
+      LivePassthroughInputLogic.shouldUseLivePassthroughInput(
+        isScreenshotMode: true,
+        hasBackdrops: false,
+        preferenceEnabled: true,
+        hasRemoteControlConflict: false
+      )
+    )
+  }
+
+  func testShouldUseLivePassthrough_remoteControlConflict_forcesLegacyPath() {
+    // UU Remote (and similar agents) inject pointer events that the consuming tap
+    // starves — selection can't move, cursor vanishes, UI feels frozen.
+    XCTAssertFalse(
+      LivePassthroughInputLogic.shouldUseLivePassthroughInput(
+        isScreenshotMode: true,
+        hasBackdrops: false,
+        preferenceEnabled: true,
+        hasRemoteControlConflict: true
+      )
+    )
+  }
+
+  func testRemoteControlConflict_matchesUURemoteHelperPath() {
+    let marker = LivePassthroughRemoteControlConflict.matchingMarker(
+      in: ["/Applications/UURemote.app/Contents/MacOS/UURemoteService"]
+    )
+    XCTAssertEqual(marker, "UURemote.app/")
+  }
+
+  func testRemoteControlConflict_ignoresUnrelatedPaths() {
+    XCTAssertNil(
+      LivePassthroughRemoteControlConflict.matchingMarker(
+        in: ["/Applications/Safari.app/Contents/MacOS/Safari", "/usr/libexec/sharingd"]
+      )
+    )
+  }
+
+  func testRemoteControlConflict_isPresent_usesInjectedPaths() {
+    XCTAssertTrue(
+      LivePassthroughRemoteControlConflict.isPresent {
+        ["/Applications/UURemote.app/Contents/MacOS/UURemoteDaemon"]
+      }
+    )
+    XCTAssertFalse(
+      LivePassthroughRemoteControlConflict.isPresent {
+        ["/Applications/Safari.app/Contents/MacOS/Safari"]
+      }
+    )
+  }
+
+  func testRemoteControlConflict_shouldHideSystemCursor_skipsWhenConflictPresent() {
+    XCTAssertTrue(
+      LivePassthroughRemoteControlConflict.shouldHideSystemCursorDuringSelection(
+        hasRemoteControlConflict: false
+      )
+    )
+    XCTAssertFalse(
+      LivePassthroughRemoteControlConflict.shouldHideSystemCursorDuringSelection(
+        hasRemoteControlConflict: true
+      )
+    )
+  }
 }

@@ -11,6 +11,20 @@ import CoreGraphics
 import Foundation
 
 enum LivePassthroughInputLogic {
+  /// Live-passthrough installs a consuming `CGEvent` tap and hides the system cursor.
+  /// Remote-control agents (UU Remote and similar) inject/relay pointer events through the
+  /// same path — the tap starves their input, the hide blanks their cursor, and the
+  /// selection overlay looks frozen. Prefer the legacy window-event path whenever one of
+  /// those agents is running.
+  static func shouldUseLivePassthroughInput(
+    isScreenshotMode: Bool,
+    hasBackdrops: Bool,
+    preferenceEnabled: Bool,
+    hasRemoteControlConflict: Bool
+  ) -> Bool {
+    isScreenshotMode && !hasBackdrops && preferenceEnabled && !hasRemoteControlConflict
+  }
+
   /// CGEvent locations arrive in global Quartz coordinates (top-left origin); the selection
   /// machinery works in AppKit global coordinates (bottom-left) — flip against the main
   /// display's height once at the boundary.

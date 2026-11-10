@@ -97,3 +97,5 @@ output as a geometry and layout check only.
 
 - For archive, export, and DMG packaging commands, see [BUILD.md](BUILD.md).
 - For release and appcast workflow, see [RELEASES.md](RELEASES.md).
+- For UU Remote / remote-desktop capture freezes and local-install TCC gotchas, see
+  [REMOTE_CONTROL_COMPAT.md](REMOTE_CONTROL_COMPAT.md).

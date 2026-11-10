@@ -163,6 +163,10 @@ final class AreaSelectionController: NSObject {
   /// pointer movement. Falls back to window-event input when Accessibility trust is missing.
   private let livePassthroughEventTap = CaptureEventTapController()
   private var isLivePassthroughInputActive = false
+  /// When a remote-control agent is present, poll the system pointer so overlay chrome
+  /// still tracks motion if AppKit mouseMoved/dragged events are starved.
+  private var isRemoteCompatInputActive = false
+  private var remoteCompatLeftWasPressed = false
   private var hasRevealedLivePassthroughDim = false
   /// Grants this background process permission to hide the system cursor (see
   /// `BackgroundCursorControl`); without it `CGDisplayHideCursor` is a no-op off the
@@ -663,6 +667,16 @@ final class AreaSelectionController: NSObject {
     // Start the event tap before windows are configured so each panel picks up the
     // correct input mode (tap-driven passthrough vs. legacy window events).
     startLivePassthroughInputIfNeeded()
+    isRemoteCompatInputActive = !isLivePassthroughInputActive
+      && LivePassthroughRemoteControlConflict.isPresent()
+    if isRemoteCompatInputActive {
+      remoteCompatLeftWasPressed = false
+      DiagnosticLogger.shared.log(
+        .info,
+        .capture,
+        "Area selection remote-compat pointer polling active"
+      )
+    }
 
     // Activate pooled windows (instant show)
     activatePooledWindows()
@@ -675,11 +689,11 @@ final class AreaSelectionController: NSObject {
     for (_, window) in windowPool {
       window.invalidateCursorRects(for: window.overlayView)
     }
-    if selectionBackdrops.isEmpty, !isLivePassthroughInputActive {
+    if isRemoteCompatInputActive || (selectionBackdrops.isEmpty && !isLivePassthroughInputActive) {
       // Passthrough sessions get pointer-follows from tap moves and need no key-window
       // churn (Esc/arrows arrive via the tap regardless of which window is key), so the
       // 60 Hz key-follows-pointer timer stays off there. It still runs for the legacy
-      // window-event fallback.
+      // window-event fallback, and always for remote-compat polling.
       startPointerTrackingIfNeeded()
     }
 
@@ -1495,6 +1509,10 @@ final class AreaSelectionController: NSObject {
   /// display, so that overlay's cursor rects render the crosshair while the app stays inactive.
   private func handlePointerTrackingTick() {
     guard isPresenting else { return }
+    if isRemoteCompatInputActive {
+      handleRemoteCompatPointerTick()
+      return
+    }
     // A manual drag owns the cursor, but the drag monitors only re-assert it on pointer
     // movement — and the WindowServer can reset the crosshair to the arrow right after
     // mouseDown (the activation handoff the click itself triggered, a backdrop recapture
@@ -1512,6 +1530,38 @@ final class AreaSelectionController: NSObject {
     // Already the key/keyboard owner — nothing to do (also the single-display fast path).
     guard displayID != keyboardOwnerDisplayID else { return }
     promotePointerDisplayToKeyOwner(window, displayID: displayID)
+  }
+
+  /// Remote-control agents can move the system pointer without delivering AppKit mouse
+  /// events to the overlay. Drive hover + drag from polled `NSEvent.mouseLocation` /
+  /// `pressedMouseButtons` so selection chrome does not freeze.
+  private func handleRemoteCompatPointerTick() {
+    let location = NSEvent.mouseLocation
+    guard let window = window(containing: location) else { return }
+    if let displayID = window.displayID, displayID != keyboardOwnerDisplayID,
+       manualSelectionStartPoint == nil
+    {
+      promotePointerDisplayToKeyOwner(window, displayID: displayID)
+    }
+
+    let leftPressed = NSEvent.pressedMouseButtons & (1 << 0) != 0
+    if leftPressed {
+      if manualSelectionStartPoint == nil {
+        window.overlayView.handlePolledMouseDown(atScreenPoint: location)
+      } else {
+        updateManualSelection(to: location)
+        reassertManualSelectionCursor()
+      }
+    } else if remoteCompatLeftWasPressed {
+      if manualSelectionStartPoint != nil {
+        endManualSelection(at: location)
+      } else {
+        window.overlayView.handlePolledMouseUp(atScreenPoint: location)
+      }
+    } else {
+      window.overlayView.handlePolledMouseMoved(atScreenPoint: location)
+    }
+    remoteCompatLeftWasPressed = leftPressed
   }
 
   /// Transfer keyboard + key-window ownership to `window`'s display. Reusing the existing
@@ -1558,14 +1608,29 @@ final class AreaSelectionController: NSObject {
   /// apps beneath so already-visible hover UI (tooltips, hover cards) is never dismissed and
   /// can be captured. Frozen and
   /// recording sessions keep window-event input, and the `screenshotLivePassthrough`
-  /// preference (default on) forces the legacy path when the user opts out.
+  /// preference (default on) forces the legacy path when the user opts out. Remote-control
+  /// agents (UU Remote, etc.) also force the legacy path — their helpers fight the
+  /// consuming tap and cursor hide (selection can't move, cursor vanishes, UI feels stuck).
   private func shouldUseLivePassthroughInput(
     mode: SelectionMode,
     backdrops: [CGDirectDisplayID: AreaSelectionBackdrop]
   ) -> Bool {
     let passthroughEnabled = UserDefaults.standard
       .object(forKey: PreferencesKeys.screenshotLivePassthrough) as? Bool ?? true
-    return mode == .screenshot && backdrops.isEmpty && passthroughEnabled
+    let remoteConflict = LivePassthroughRemoteControlConflict.isPresent()
+    if remoteConflict {
+      DiagnosticLogger.shared.log(
+        .info,
+        .capture,
+        "Live passthrough skipped: remote-control agent conflict (using window-event input)"
+      )
+    }
+    return LivePassthroughInputLogic.shouldUseLivePassthroughInput(
+      isScreenshotMode: mode == .screenshot,
+      hasBackdrops: !backdrops.isEmpty,
+      preferenceEnabled: passthroughEnabled,
+      hasRemoteControlConflict: remoteConflict
+    )
   }
 
   /// The system Accessibility prompt is shown at most once per app run, so users who
@@ -1844,6 +1909,8 @@ final class AreaSelectionController: NSObject {
     dismissesAfterSelection = true
     stopPointerTracking()
     stopLivePassthroughInput()
+    isRemoteCompatInputActive = false
+    remoteCompatLeftWasPressed = false
     cancelSessionPresentationWatchdog()
     lumaRecapturingTask?.cancel()
     lumaRecapturingTask = nil
@@ -4303,6 +4370,23 @@ final class AreaSelectionOverlayView: NSView {
   func handleLivePassthroughMouseMoved(atScreenPoint screenPoint: CGPoint) {
     guard isLivePassthroughInput, let localPoint = localPoint(fromScreenPoint: screenPoint) else { return }
     hasLivePassthroughPointerPosition = true
+    handlePrimaryMouseMoved(at: localPoint)
+  }
+
+  /// Remote-compat polling entry points — same handlers as window/tap input, without the
+  /// live-passthrough guard (that mode is off when polling runs).
+  func handlePolledMouseDown(atScreenPoint screenPoint: CGPoint) {
+    guard let localPoint = localPoint(fromScreenPoint: screenPoint) else { return }
+    handlePrimaryMouseDown(at: localPoint)
+  }
+
+  func handlePolledMouseUp(atScreenPoint screenPoint: CGPoint) {
+    guard let localPoint = localPoint(fromScreenPoint: screenPoint) else { return }
+    handlePrimaryMouseUp(at: localPoint)
+  }
+
+  func handlePolledMouseMoved(atScreenPoint screenPoint: CGPoint) {
+    guard let localPoint = localPoint(fromScreenPoint: screenPoint) else { return }
     handlePrimaryMouseMoved(at: localPoint)
   }
 
