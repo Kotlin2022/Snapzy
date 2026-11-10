@@ -4,6 +4,12 @@ All notable changes to Snapzy will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Bug Fixes
+
+- 修复开启 UU 远程等远程控制工具时，区域截图 / 区域标注准星不移动、像卡住的问题：检测远程助手进程后跳过 Live Passthrough 吞事件与藏光标，改为轮询系统指针位置（详见 `docs/REMOTE_CONTROL_COMPAT.md`）
+
 ## [1.32.0-beta.9] - 2026-09-09
 
 ### Bug Fixes
