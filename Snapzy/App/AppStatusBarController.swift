@@ -1143,6 +1143,7 @@ final class AppStatusBarController: ObservableObject {
     pendingPreferencesWindowTrackingWorkItem = nil
 
     if let trackedPreferencesWindow, trackedPreferencesWindow.isVisible {
+      enablePreferencesWindowResizing(trackedPreferencesWindow)
       syncTrackedPreferencesWindowExclusion()
       return
     }
@@ -1154,6 +1155,7 @@ final class AppStatusBarController: ObservableObject {
       !existingWindowNumbers.contains($0.windowNumber)
     }) {
       trackedPreferencesWindow = candidate
+      enablePreferencesWindowResizing(candidate)
       DiagnosticLogger.shared.log(
         .debug,
         .preferences,
@@ -1177,6 +1179,20 @@ final class AppStatusBarController: ObservableObject {
     }
     pendingPreferencesWindowTrackingWorkItem = workItem
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: workItem)
+  }
+
+  /// SwiftUI `Settings` often ships a non-resizable window (maxSize == frame). Force
+  /// `.resizable` plus an open max size so users can drag the preferences window larger.
+  private func enablePreferencesWindowResizing(_ window: NSWindow) {
+    window.styleMask.insert(.resizable)
+    let minimum = NSSize(width: 760, height: 550)
+    if window.minSize.width < minimum.width || window.minSize.height < minimum.height {
+      window.minSize = minimum
+    }
+    window.maxSize = NSSize(
+      width: CGFloat.greatestFiniteMagnitude,
+      height: CGFloat.greatestFiniteMagnitude
+    )
   }
 
   private func syncTrackedPreferencesWindowExclusion() {

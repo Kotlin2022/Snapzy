@@ -126,6 +126,14 @@ final class InlineAreaAnnotateSession: ObservableObject {
   private let hidesSystemCursorDuringSelection: Bool
   private var remoteCompatPointerTimer: Timer?
   private var remoteCompatLeftWasPressed = false
+  /// Display-rate coalescing for remote-compat hover chrome (pointer + window hit-test).
+  private var lastRemoteCompatHoverProcessTime: TimeInterval = 0
+  /// Display-rate coalescing for manual-drag rect + pointer chrome. High-Hz mice otherwise
+  /// republish two `@Published` fields (and rebuild dual-display SwiftUI backdrops + magnifier)
+  /// per event — main-thread stalls read as mid-drag hitch / dropped frames.
+  private var pendingSelectionDragPoint: CGPoint?
+  private var isSelectionDragUpdateScheduled = false
+  private var lastSelectionDragProcessTime: TimeInterval = 0
 
   init(
     primaryDisplayID: CGDirectDisplayID,
@@ -211,18 +219,35 @@ final class InlineAreaAnnotateSession: ObservableObject {
     remoteCompatPointerTimer?.invalidate()
     remoteCompatPointerTimer = nil
     remoteCompatLeftWasPressed = false
+    lastRemoteCompatHoverProcessTime = 0
+    pendingSelectionDragPoint = nil
+    isSelectionDragUpdateScheduled = false
+    lastSelectionDragProcessTime = 0
   }
 
   private func handleRemoteCompatPointerTick() {
     guard phase == .selecting, !didComplete else { return }
     let screenPoint = NSEvent.mouseLocation
     let desktopPoint = localDesktopPoint(for: screenPoint)
-    selectionPointerLocation = desktopPoint
-    updateHoveredWindow(atScreenPoint: screenPoint)
 
     // Button-state polling backs SwiftUI gestures when remote injection skips AppKit
     // mouse-dragged delivery — same symptom as the frozen crosshair.
     let leftPressed = NSEvent.pressedMouseButtons & (1 << 0) != 0
+    let isDragging = leftPressed && selectionStartPoint != nil
+    let now = ProcessInfo.processInfo.systemUptime
+    let hoverElapsed = lastRemoteCompatHoverProcessTime > 0
+      ? now - lastRemoteCompatHoverProcessTime
+      : .greatestFiniteMagnitude
+    if LivePassthroughInputLogic.shouldPublishRemoteCompatHoverChrome(
+      elapsed: hoverElapsed,
+      interval: Self.selectionDragUIMinInterval,
+      isDragging: isDragging
+    ) {
+      lastRemoteCompatHoverProcessTime = now
+      selectionPointerLocation = desktopPoint
+      updateHoveredWindow(atScreenPoint: screenPoint)
+    }
+
     if leftPressed {
       if selectionStartPoint == nil {
         beginSelection(at: desktopPoint)
@@ -370,6 +395,74 @@ final class InlineAreaAnnotateSession: ObservableObject {
   }
 
   func updateSelection(to localPoint: CGPoint) {
+    guard phase == .selecting, selectionStartPoint != nil else { return }
+    pendingSelectionDragPoint = localPoint
+    guard !isSelectionDragUpdateScheduled else { return }
+
+    let now = ProcessInfo.processInfo.systemUptime
+    let interval = Self.selectionDragUIMinInterval
+    let elapsed = now - lastSelectionDragProcessTime
+    if LivePassthroughInputLogic.shouldFlushLeadingEdge(elapsed: elapsed, interval: interval) {
+      flushSelectionDrag()
+      return
+    }
+
+    isSelectionDragUpdateScheduled = true
+    DispatchQueue.main.asyncAfter(deadline: .now() + (interval - elapsed)) { [weak self] in
+      guard let self else { return }
+      self.isSelectionDragUpdateScheduled = false
+      self.flushSelectionDrag()
+    }
+  }
+
+  func endSelection(at localPoint: CGPoint) {
+    guard phase == .selecting, selectionStartPoint != nil else { return }
+    // Commit the release point immediately — coalesced trailing flushes must not lag behind.
+    pendingSelectionDragPoint = localPoint
+    flushSelectionDrag()
+    removeSelectionMonitor()
+    selectionStartPoint = nil
+    selectionPointerLocation = nil
+    lastSelectionDragProcessTime = 0
+
+    guard let rect = selectionRect, rect.width > 5, rect.height > 5 else {
+      selectionRect = nil
+      return
+    }
+    beginAnnotating(with: rect)
+  }
+
+  /// Same display-rate gate as live-passthrough drag — keep selection chrome on the refresh
+  /// cadence the screen can actually show.
+  private static var selectionDragUIMinInterval: TimeInterval {
+    let fps = NSScreen.screens.map(\.maximumFramesPerSecond).max() ?? 60
+    return LivePassthroughInputLogic.uiMinInterval(maxDisplayFPS: fps)
+  }
+
+  private func flushSelectionDrag() {
+    guard let point = pendingSelectionDragPoint else { return }
+    pendingSelectionDragPoint = nil
+    let now = ProcessInfo.processInfo.systemUptime
+    let interval = Self.selectionDragUIMinInterval
+    let elapsed = lastSelectionDragProcessTime > 0
+      ? now - lastSelectionDragProcessTime
+      : 0
+    lastSelectionDragProcessTime = now
+    if LivePassthroughInputLogic.isAnomalousPointerGap(elapsed: elapsed, interval: interval) {
+      DiagnosticLogger.shared.log(
+        .warning,
+        .capture,
+        "Inline area selection drag gap (selection hitch)",
+        context: [
+          "gap_ms": String(format: "%.1f", elapsed * 1000),
+          "interval_ms": String(format: "%.1f", interval * 1000),
+        ]
+      )
+    }
+    applySelectionDrag(at: point)
+  }
+
+  private func applySelectionDrag(at localPoint: CGPoint) {
     guard phase == .selecting, let start = selectionStartPoint else { return }
     selectionPointerLocation = localPoint
     selectionRect = clampedSelectionRect(CGRect(
@@ -378,20 +471,6 @@ final class InlineAreaAnnotateSession: ObservableObject {
       width: abs(localPoint.x - start.x),
       height: abs(localPoint.y - start.y)
     ).standardized)
-  }
-
-  func endSelection(at localPoint: CGPoint) {
-    guard phase == .selecting, selectionStartPoint != nil else { return }
-    updateSelection(to: localPoint)
-    removeSelectionMonitor()
-    selectionStartPoint = nil
-    selectionPointerLocation = nil
-
-    guard let rect = selectionRect, rect.width > 5, rect.height > 5 else {
-      selectionRect = nil
-      return
-    }
-    beginAnnotating(with: rect)
   }
 
   func beginAnnotating(with localRect: CGRect) {

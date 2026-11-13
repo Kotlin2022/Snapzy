@@ -6888,6 +6888,182 @@
           }
         }
       }
+    },
+    "preferences-shortcuts.secure-input-blocking-tip": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Screenshot shortcuts are blocked while Secure Keyboard Entry is on (Terminal menu → uncheck Secure Keyboard Entry)."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "截图快捷键被“安全键盘输入”挡住了（打开终端菜单，取消勾选“安全键盘输入”）。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "截圖快速鍵被「安全鍵盤輸入」擋住了（打開終端機選單，取消勾選「安全鍵盤輸入」）。"
+          }
+        }
+      }
+    },
+    "preferences-shortcuts.hotkey-conflict-reason-separator": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "; "
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "；"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "；"
+          }
+        }
+      }
+    },
+    "preferences-shortcuts.hotkey-conflict-reason-secure-input": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Secure Keyboard Entry"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安全键盘输入"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安全鍵盤輸入"
+          }
+        }
+      }
+    },
+    "preferences-shortcuts.hotkey-conflict-reason-already-taken": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "shortcut already taken by another app"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "快捷键已被其他 App 占用"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "快速鍵已被其他 App 佔用"
+          }
+        }
+      }
+    },
+    "preferences-shortcuts.hotkey-conflict-reason-front-app": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "frontmost app: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前前台：%@"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "目前前景：%@"
+          }
+        }
+      }
+    },
+    "preferences-shortcuts.hotkey-conflict-tip": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ did not reach Snapzy. Possible conflict: %@."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 未触发 Snapzy。可能冲突：%@。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 未觸發 Snapzy。可能衝突：%@。"
+          }
+        }
+      }
+    },
+    "preferences-shortcuts.hotkey-conflict-tip-unknown": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ did not reach Snapzy (unknown conflict)."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 未触发 Snapzy（未知冲突）。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 未觸發 Snapzy（未知衝突）。"
+          }
+        }
+      }
+    },
+    "preferences-shortcuts.hotkey-registration-failed-tip": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not register %@: %@ — another app may already own this shortcut."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法注册%@：%@ — 可能已被其他 App 占用。"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "無法註冊%@：%@ — 可能已被其他 App 佔用。"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

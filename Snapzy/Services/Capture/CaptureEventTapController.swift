@@ -260,8 +260,17 @@ final class CaptureEventTapController {
     switch type {
     case .tapDisabledByTimeout, .tapDisabledByUserInput:
       // The system disabled the tap (timeout or user input); re-enable it so
-      // the capture session keeps receiving events.
+      // the capture session keeps receiving events. While disabled, mouse
+      // dragged events are dropped — the selection rect freezes then jumps
+      // when the next event arrives after re-enable.
       PerfSignpost.CapturePassthrough.event("tapDisabled")
+      let reason = type == .tapDisabledByTimeout ? "timeout" : "userInput"
+      DiagnosticLogger.shared.log(
+        .warning,
+        .capture,
+        "Capture event tap disabled by system; re-enabling",
+        context: ["reason": reason]
+      )
       if let tap {
         dependencies.setTapEnabled(tap, true)
       }

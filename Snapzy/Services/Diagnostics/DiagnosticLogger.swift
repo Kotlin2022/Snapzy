@@ -322,4 +322,43 @@ final class DiagnosticLogger {
       currentDateString = nil
     }
   }
+
+  /// Regular `snapzy_*.txt` log files under `directory` (ignores unrelated files).
+  static func diagnosticLogFileURLs(in directory: URL) -> [URL] {
+    let fm = FileManager.default
+    guard let files = try? fm.contentsOfDirectory(
+      at: directory,
+      includingPropertiesForKeys: [.isRegularFileKey],
+      options: [.skipsHiddenFiles]
+    ) else {
+      return []
+    }
+    return files.filter { url in
+      url.lastPathComponent.hasPrefix("snapzy_")
+        && url.pathExtension == "txt"
+        && ((try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true)
+    }
+  }
+
+  /// Delete every `snapzy_*.txt` diagnostic log file. Closes open handles first so
+  /// today's file can be removed. Returns how many files were deleted.
+  @discardableResult
+  func clearAllLogFiles() -> Int {
+    closeHandles()
+    writeQueue.sync {
+      hasWrittenSessionHeader = false
+    }
+
+    let fm = FileManager.default
+    var deleted = 0
+    for url in Self.diagnosticLogFileURLs(in: logDirectoryURL) {
+      do {
+        try fm.removeItem(at: url)
+        deleted += 1
+      } catch {
+        // Best-effort clear — keep going so one locked file does not abort the rest.
+      }
+    }
+    return deleted
+  }
 }

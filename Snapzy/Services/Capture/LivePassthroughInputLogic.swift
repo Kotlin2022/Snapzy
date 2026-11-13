@@ -49,6 +49,42 @@ enum LivePassthroughInputLogic {
     return abs(newPoint.x - lastProcessedPoint.x) >= 1 || abs(newPoint.y - lastProcessedPoint.y) >= 1
   }
 
+  /// Display-rate spacing for pointer-following UI (hover chrome and manual-drag rect).
+  /// A 1kHz mouse must not schedule 1000 main-thread updates/sec — that starves the
+  /// CGEventTap and triggers `tapDisabledByTimeout` (selection freezes, then jumps).
+  static func uiMinInterval(maxDisplayFPS: Int) -> TimeInterval {
+    1.0 / Double(max(maxDisplayFPS, 1))
+  }
+
+  /// Leading edge: flush immediately when enough time has already elapsed since the last
+  /// processed sample; otherwise the caller schedules one trailing flush.
+  static func shouldFlushLeadingEdge(elapsed: TimeInterval, interval: TimeInterval) -> Bool {
+    elapsed >= interval
+  }
+
+  /// Gaps longer than a few frames usually mean the main thread stalled or the system
+  /// briefly disabled the event tap — the selection rect appears to hitch then jump.
+  static func isAnomalousPointerGap(
+    elapsed: TimeInterval,
+    interval: TimeInterval,
+    frameMultiplier: Double = 3
+  ) -> Bool {
+    guard interval > 0 else { return false }
+    return elapsed > interval * frameMultiplier
+  }
+
+  /// Remote-compat polling runs at a fixed timer rate. Publishing hover chrome
+  /// (`selectionPointerLocation` + window hit-tests) every tick while a drag flush already
+  /// republishes the same fields doubles SwiftUI work and reads as mid-drag hitch.
+  static func shouldPublishRemoteCompatHoverChrome(
+    elapsed: TimeInterval,
+    interval: TimeInterval,
+    isDragging: Bool
+  ) -> Bool {
+    guard !isDragging else { return false }
+    return shouldFlushLeadingEdge(elapsed: elapsed, interval: interval)
+  }
+
   /// Dim visibility in passthrough sessions, mirroring the legacy window-event appearance:
   /// window-selection mode always shows the dim (the hovered window gets a cutout via the
   /// existing mask); manual region shows it from session start when the selection-area-overlay

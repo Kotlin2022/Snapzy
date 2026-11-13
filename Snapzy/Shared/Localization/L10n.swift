@@ -305,6 +305,21 @@ nonisolated enum L10n {
       PreferencesGeneral.logRetentionDescription(days)
     }
     static let openFolderButton = PreferencesGeneral.openFolderButton
+    static let exportLogsButton = PreferencesGeneral.exportLogsButton
+    static let exportLogsTitle = PreferencesGeneral.exportLogsTitle
+    static let exportLogsDescription = PreferencesGeneral.exportLogsDescription
+    static let exportLogsSucceeded = PreferencesGeneral.exportLogsSucceeded
+    static let exportLogsFailed = PreferencesGeneral.exportLogsFailed
+    static let exportLogsDisabled = PreferencesGeneral.exportLogsDisabled
+    static let exportLogsPanelTitle = PreferencesGeneral.exportLogsPanelTitle
+    static let clearLogsButton = PreferencesGeneral.clearLogsButton
+    static let clearLogsTitle = PreferencesGeneral.clearLogsTitle
+    static let clearLogsDescription = PreferencesGeneral.clearLogsDescription
+    static let clearLogsConfirmationTitle = PreferencesGeneral.clearLogsConfirmationTitle
+    static let clearLogsConfirmationMessage = PreferencesGeneral.clearLogsConfirmationMessage
+    static let clearLogsConfirmButton = PreferencesGeneral.clearLogsConfirmButton
+    static let clearLogsSucceeded = PreferencesGeneral.clearLogsSucceeded
+    static let clearLogsAlreadyEmpty = PreferencesGeneral.clearLogsAlreadyEmpty
     static let calculating = PreferencesGeneral.calculating
     static let noLogs = PreferencesGeneral.noLogs
     static let exportTitle = string(
@@ -2172,6 +2187,81 @@ nonisolated enum L10n {
       defaultValue: "Open Folder",
       comment: "General preferences button title"
     )
+    static let exportLogsButton = string(
+      "preferences-general.export-logs-button",
+      defaultValue: "Export Logs",
+      comment: "General preferences button title for exporting diagnostic logs"
+    )
+    static let exportLogsTitle = string(
+      "preferences-general.export-logs-title",
+      defaultValue: "Export Diagnostic Logs",
+      comment: "General preferences setting title for exporting diagnostic logs"
+    )
+    static let exportLogsDescription = string(
+      "preferences-general.export-logs-description",
+      defaultValue: "Save a zip of local diagnostic logs to send when reporting a bug",
+      comment: "General preferences setting description for exporting diagnostic logs"
+    )
+    static let exportLogsSucceeded = string(
+      "preferences-general.export-logs-succeeded",
+      defaultValue: "Diagnostic logs exported",
+      comment: "Toast after successfully exporting diagnostic logs"
+    )
+    static let exportLogsFailed = string(
+      "preferences-general.export-logs-failed",
+      defaultValue: "Could not export diagnostic logs",
+      comment: "Toast when diagnostic log export fails"
+    )
+    static let exportLogsDisabled = string(
+      "preferences-general.export-logs-disabled",
+      defaultValue: "Turn on Diagnostic Logging first, reproduce the issue, then export",
+      comment: "Toast when export is attempted while diagnostic logging is off and no logs exist"
+    )
+    static let exportLogsPanelTitle = string(
+      "preferences-general.export-logs-panel-title",
+      defaultValue: "Export Diagnostic Logs",
+      comment: "Save panel title when exporting diagnostic logs"
+    )
+    static let clearLogsButton = string(
+      "preferences-general.clear-logs-button",
+      defaultValue: "Clear Logs",
+      comment: "General preferences button title for clearing diagnostic logs"
+    )
+    static let clearLogsTitle = string(
+      "preferences-general.clear-logs-title",
+      defaultValue: "Clear Diagnostic Logs",
+      comment: "General preferences setting title for clearing diagnostic logs"
+    )
+    static let clearLogsDescription = string(
+      "preferences-general.clear-logs-description",
+      defaultValue: "Delete all local diagnostic log files from this Mac",
+      comment: "General preferences setting description for clearing diagnostic logs"
+    )
+    static let clearLogsConfirmationTitle = string(
+      "preferences-general.clear-logs-confirmation-title",
+      defaultValue: "Clear All Diagnostic Logs?",
+      comment: "Confirmation alert title before deleting diagnostic logs"
+    )
+    static let clearLogsConfirmationMessage = string(
+      "preferences-general.clear-logs-confirmation-message",
+      defaultValue: "This permanently deletes every Snapzy diagnostic log file on this Mac. This cannot be undone.",
+      comment: "Confirmation alert message before deleting diagnostic logs"
+    )
+    static let clearLogsConfirmButton = string(
+      "preferences-general.clear-logs-confirm-button",
+      defaultValue: "Clear Logs",
+      comment: "Destructive confirmation button that deletes diagnostic logs"
+    )
+    static let clearLogsSucceeded = string(
+      "preferences-general.clear-logs-succeeded",
+      defaultValue: "Diagnostic logs cleared",
+      comment: "Toast after successfully clearing diagnostic logs"
+    )
+    static let clearLogsAlreadyEmpty = string(
+      "preferences-general.clear-logs-already-empty",
+      defaultValue: "No diagnostic logs to clear",
+      comment: "Toast when clear logs is pressed but no log files exist"
+    )
     static let openReportPageButton = string(
       "preferences-general.open-report-page-button",
       defaultValue: "Open Report Page",
@@ -3461,6 +3551,60 @@ nonisolated enum L10n {
       defaultValue: "Shortcuts that use the Fn key need Accessibility permission to work from other apps.",
       comment: "Warning shown when an Fn-based shortcut is configured but Accessibility permission is missing"
     )
+    static let secureInputBlockingTip = string(
+      "preferences-shortcuts.secure-input-blocking-tip",
+      defaultValue: "Screenshot shortcuts are blocked while Secure Keyboard Entry is on (Terminal menu → uncheck Secure Keyboard Entry).",
+      comment: "Toast shown when macOS Secure Event Input prevents Snapzy global hotkeys from firing"
+    )
+    static let hotkeyConflictReasonSeparator = string(
+      "preferences-shortcuts.hotkey-conflict-reason-separator",
+      defaultValue: "; ",
+      comment: "Separator between hotkey conflict reason fragments in a toast"
+    )
+    static let hotkeyConflictReasonSecureInput = string(
+      "preferences-shortcuts.hotkey-conflict-reason-secure-input",
+      defaultValue: "Secure Keyboard Entry",
+      comment: "Conflict reason when macOS Secure Event Input is blocking global hotkeys"
+    )
+    static let hotkeyConflictReasonAlreadyTaken = string(
+      "preferences-shortcuts.hotkey-conflict-reason-already-taken",
+      defaultValue: "shortcut already taken by another app",
+      comment: "Conflict reason when Carbon refused to register a Snapzy hotkey"
+    )
+    static func hotkeyConflictReasonFrontApp(_ appName: String) -> String {
+      format(
+        "preferences-shortcuts.hotkey-conflict-reason-front-app",
+        defaultValue: "frontmost app: %@",
+        comment: "Conflict reason naming the frontmost app. %@ is the app name.",
+        appName
+      )
+    }
+    static func hotkeyConflictTip(_ shortcut: String, _ reasons: String) -> String {
+      format(
+        "preferences-shortcuts.hotkey-conflict-tip",
+        defaultValue: "%@ did not reach Snapzy. Possible conflict: %@.",
+        comment: "Toast when a Snapzy hotkey was pressed but not handled. First %@ is the shortcut, second %@ is joined reasons.",
+        shortcut,
+        reasons
+      )
+    }
+    static func hotkeyConflictTipUnknown(_ shortcut: String) -> String {
+      format(
+        "preferences-shortcuts.hotkey-conflict-tip-unknown",
+        defaultValue: "%@ did not reach Snapzy (unknown conflict).",
+        comment: "Toast when a Snapzy hotkey was pressed but not handled and no specific reason is known. %@ is the shortcut.",
+        shortcut
+      )
+    }
+    static func hotkeyRegistrationFailedTip(_ actionName: String, _ shortcut: String) -> String {
+      format(
+        "preferences-shortcuts.hotkey-registration-failed-tip",
+        defaultValue: "Could not register %@: %@ — another app may already own this shortcut.",
+        comment: "Toast when RegisterEventHotKey fails. First %@ is the action name, second %@ is the shortcut display string.",
+        actionName,
+        shortcut
+      )
+    }
     static let enableShortcutsTitle = string(
       "preferences-shortcuts.enable-shortcuts-title",
       defaultValue: "Enable Shortcuts",

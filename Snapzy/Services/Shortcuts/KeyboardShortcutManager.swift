@@ -660,6 +660,21 @@ final class KeyboardShortcutManager {
   private var fnGlobalMonitor: Any?
   private var fnLocalMonitor: Any?
 
+  /// Carbon (and failed-registration) bindings watched by the conflict probe monitors.
+  private var monitoredCarbonBindings: [MonitoredHotkeyBinding] = []
+  private var conflictProbeGlobalMonitor: Any?
+  private var conflictProbeLocalMonitor: Any?
+  private var recentlyHandledHotkeyAt: [UInt32: TimeInterval] = [:]
+  private var lastConflictTipAt: TimeInterval = 0
+
+  private struct MonitoredHotkeyBinding {
+    let id: UInt32
+    let config: ShortcutConfig
+    let actionName: String
+    let kind: GlobalShortcutKind?
+    let carbonRegistered: Bool
+  }
+
   // Hotkey IDs
   private let fullscreenHotkeyID = EventHotKeyID(signature: OSType(0x5A53_4631), id: 1)  // "ZSF1"
   private let areaHotkeyID = EventHotKeyID(signature: OSType(0x5A53_4632), id: 2)  // "ZSF2"
@@ -684,6 +699,11 @@ final class KeyboardShortcutManager {
   private let repeatAreaHotkeyID = EventHotKeyID(signature: OSType(0x5A53_464C), id: 21)         // "ZSFL"
 
   private var eventHandler: EventHandlerRef?
+  /// Terminal (and similar apps) can enable Secure Event Input, which blocks Carbon
+  /// global hotkeys while that app owns the keyboard. Observe activation so we can tip
+  /// the user once — there is no API that legitimately bypasses Secure Input.
+  private var secureInputObserver: NSObjectProtocol?
+  private var didAnnounceSecureInputBlock = false
 
   // UserDefaults keys
   private let fullscreenShortcutKey = "fullscreenShortcut"
@@ -750,6 +770,7 @@ final class KeyboardShortcutManager {
     isEnabled = true
     UserDefaults.standard.set(true, forKey: shortcutsEnabledKey)
     refreshShortcutRegistration()
+    startSecureInputObservationIfNeeded()
   }
 
   /// Disable global shortcuts
@@ -758,6 +779,7 @@ final class KeyboardShortcutManager {
     isEnabled = false
     UserDefaults.standard.set(false, forKey: shortcutsEnabledKey)
     refreshShortcutRegistration()
+    stopSecureInputObservation()
   }
 
   /// Temporarily suspend registered hotkeys without mutating the persisted enabled setting.
@@ -784,12 +806,14 @@ final class KeyboardShortcutManager {
   func refreshShortcutRegistration() {
     unregisterAllShortcuts()
     fnBindings.removeAll()
+    monitoredCarbonBindings.removeAll()
 
     if shouldRegisterShortcuts {
       registerShortcuts()
     }
 
     updateFnMonitors()
+    updateConflictProbeMonitors()
   }
 
   /// Re-register shortcuts when a recording session starts or ends so
@@ -1422,6 +1446,7 @@ final class KeyboardShortcutManager {
       return
     }
 
+    recentlyHandledHotkeyAt[id] = ProcessInfo.processInfo.systemUptime
     DiagnosticLogger.shared.log(.info, .action, "Shortcut triggered: \(actionName)")
 
     guard let delegate = delegate else {
@@ -1626,7 +1651,18 @@ final class KeyboardShortcutManager {
       &ref
     )
 
-    if status != noErr || ref == nil {
+    let registered = status == noErr && ref != nil
+    monitoredCarbonBindings.append(
+      MonitoredHotkeyBinding(
+        id: hotkeyID.id,
+        config: config,
+        actionName: kind.displayName,
+        kind: kind,
+        carbonRegistered: registered
+      )
+    )
+
+    if !registered {
       DiagnosticLogger.shared.log(
         .warning,
         .action,
@@ -1634,6 +1670,7 @@ final class KeyboardShortcutManager {
         context: ["status": String(status)]
       )
       ref = nil
+      announceRegistrationFailure(actionName: kind.displayName, shortcut: config)
       return
     }
 
@@ -1670,7 +1707,18 @@ final class KeyboardShortcutManager {
       &ref
     )
 
-    if status != noErr || ref == nil {
+    let registered = status == noErr && ref != nil
+    monitoredCarbonBindings.append(
+      MonitoredHotkeyBinding(
+        id: hotkeyID.id,
+        config: config,
+        actionName: label,
+        kind: parentKind,
+        carbonRegistered: registered
+      )
+    )
+
+    if !registered {
       DiagnosticLogger.shared.log(
         .warning,
         .action,
@@ -1678,6 +1726,7 @@ final class KeyboardShortcutManager {
         context: ["status": String(status)]
       )
       ref = nil
+      announceRegistrationFailure(actionName: label, shortcut: config)
       return
     }
 
@@ -1737,6 +1786,158 @@ final class KeyboardShortcutManager {
       return
     }
     handleHotkey(id: binding.id)
+  }
+
+  // MARK: - Hotkey Conflict Probe
+
+  /// Observes the same combos Carbon registered (or failed to register). If the key is
+  /// seen but Snapzy never handled it, surface a tip naming likely conflict sources.
+  private func updateConflictProbeMonitors() {
+    guard shouldRegisterShortcuts, !monitoredCarbonBindings.isEmpty else {
+      removeConflictProbeMonitors()
+      return
+    }
+    installConflictProbeMonitorsIfNeeded()
+  }
+
+  private func installConflictProbeMonitorsIfNeeded() {
+    if conflictProbeGlobalMonitor == nil {
+      conflictProbeGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+        MainActor.assumeIsolated {
+          self?.scheduleConflictProbe(for: event)
+        }
+      }
+    }
+    if conflictProbeLocalMonitor == nil {
+      conflictProbeLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+        MainActor.assumeIsolated {
+          self?.scheduleConflictProbe(for: event)
+        }
+        return event
+      }
+    }
+  }
+
+  private func removeConflictProbeMonitors() {
+    if let conflictProbeGlobalMonitor {
+      NSEvent.removeMonitor(conflictProbeGlobalMonitor)
+      self.conflictProbeGlobalMonitor = nil
+    }
+    if let conflictProbeLocalMonitor {
+      NSEvent.removeMonitor(conflictProbeLocalMonitor)
+      self.conflictProbeLocalMonitor = nil
+    }
+  }
+
+  private func scheduleConflictProbe(for event: NSEvent) {
+    guard !event.isARepeat else { return }
+    guard let binding = monitoredCarbonBindings.first(where: { $0.config.matches(event: event) }) else {
+      return
+    }
+
+    // Carbon delivers almost immediately; give it a beat before declaring a miss.
+    let hotkeyID = binding.id
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+      self?.announceConflictIfUnhandled(bindingID: hotkeyID)
+    }
+  }
+
+  private func announceConflictIfUnhandled(bindingID: UInt32) {
+    guard let binding = monitoredCarbonBindings.first(where: { $0.id == bindingID }) else { return }
+
+    let now = ProcessInfo.processInfo.systemUptime
+    if let handledAt = recentlyHandledHotkeyAt[bindingID], now - handledAt < 0.2 {
+      return
+    }
+
+    // Avoid toast spam while the user holds/retries the same combo.
+    guard now - lastConflictTipAt > 2.0 else { return }
+    lastConflictTipAt = now
+
+    let frontmost = NSWorkspace.shared.frontmostApplication?.localizedName
+    let systemConflicts: [String]
+    if let kind = binding.kind {
+      systemConflicts = SystemScreenshotShortcutManager.shared.conflictDescriptions(
+        for: kind,
+        shortcut: binding.config
+      )
+    } else {
+      systemConflicts = []
+    }
+
+    let message = HotkeyConflictTipLogic.tipMessage(
+      shortcutDisplay: binding.config.displayString,
+      frontmostAppName: frontmost,
+      systemConflictNames: systemConflicts,
+      secureInputEnabled: IsSecureEventInputEnabled(),
+      registrationFailed: !binding.carbonRegistered
+    )
+
+    DiagnosticLogger.shared.log(
+      .warning,
+      .action,
+      "Hotkey conflict tip",
+      context: [
+        "shortcut": binding.config.displayString,
+        "action": binding.actionName,
+        "frontmost": frontmost ?? "nil",
+        "secure_input": IsSecureEventInputEnabled() ? "true" : "false",
+        "carbon_registered": binding.carbonRegistered ? "true" : "false",
+      ]
+    )
+
+    AppToastManager.shared.show(message: message, style: .warning, duration: 5.0)
+  }
+
+  private func announceRegistrationFailure(actionName: String, shortcut: ShortcutConfig) {
+    let message = L10n.PreferencesShortcuts.hotkeyRegistrationFailedTip(
+      actionName,
+      shortcut.displayString
+    )
+    AppToastManager.shared.show(message: message, style: .warning, duration: 4.0)
+  }
+
+  // MARK: - Secure Event Input
+
+  private func startSecureInputObservationIfNeeded() {
+    guard secureInputObserver == nil else { return }
+    secureInputObserver = NSWorkspace.shared.notificationCenter.addObserver(
+      forName: NSWorkspace.didActivateApplicationNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      // Secure Input often flips on *after* the activation notification — check next turn.
+      DispatchQueue.main.async {
+        self?.announceSecureInputBlockIfNeeded()
+      }
+    }
+  }
+
+  private func stopSecureInputObservation() {
+    if let secureInputObserver {
+      NSWorkspace.shared.notificationCenter.removeObserver(secureInputObserver)
+      self.secureInputObserver = nil
+    }
+  }
+
+  private func announceSecureInputBlockIfNeeded() {
+    guard shouldRegisterShortcuts else { return }
+    guard IsSecureEventInputEnabled() else {
+      didAnnounceSecureInputBlock = false
+      return
+    }
+    DiagnosticLogger.shared.log(
+      .warning,
+      .action,
+      "Global shortcuts blocked: Secure Event Input is enabled (often Terminal → Secure Keyboard Entry)"
+    )
+    guard !didAnnounceSecureInputBlock else { return }
+    didAnnounceSecureInputBlock = true
+    AppToastManager.shared.show(
+      message: L10n.PreferencesShortcuts.secureInputBlockingTip,
+      style: .warning,
+      duration: 5.0
+    )
   }
 
   private func unregisterAllShortcuts() {

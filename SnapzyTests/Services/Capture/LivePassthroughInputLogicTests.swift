@@ -85,6 +85,33 @@ final class LivePassthroughInputLogicTests: XCTestCase {
     )
   }
 
+  // MARK: - Display-rate coalesce helpers
+
+  func testUIMinInterval_matchesDisplayRefresh() {
+    XCTAssertEqual(LivePassthroughInputLogic.uiMinInterval(maxDisplayFPS: 60), 1.0 / 60.0, accuracy: 1e-9)
+    XCTAssertEqual(LivePassthroughInputLogic.uiMinInterval(maxDisplayFPS: 120), 1.0 / 120.0, accuracy: 1e-9)
+    XCTAssertEqual(LivePassthroughInputLogic.uiMinInterval(maxDisplayFPS: 0), 1.0, accuracy: 1e-9)
+  }
+
+  func testShouldFlushLeadingEdge_waitsUntilIntervalElapses() {
+    XCTAssertFalse(
+      LivePassthroughInputLogic.shouldFlushLeadingEdge(elapsed: 0.004, interval: 1.0 / 60.0)
+    )
+    XCTAssertTrue(
+      LivePassthroughInputLogic.shouldFlushLeadingEdge(elapsed: 1.0 / 60.0, interval: 1.0 / 60.0)
+    )
+  }
+
+  func testIsAnomalousPointerGap_flagsMultiFrameHitches() {
+    let interval = 1.0 / 60.0
+    XCTAssertFalse(
+      LivePassthroughInputLogic.isAnomalousPointerGap(elapsed: interval * 2, interval: interval)
+    )
+    XCTAssertTrue(
+      LivePassthroughInputLogic.isAnomalousPointerGap(elapsed: interval * 3.1, interval: interval)
+    )
+  }
+
   // MARK: - Dim Driver
 
   func testShowsDim_manualRegion_preDrag_overlayPrefOn_shown() {
@@ -321,13 +348,46 @@ final class LivePassthroughInputLogicTests: XCTestCase {
   func testRemoteControlConflict_isPresent_usesInjectedPaths() {
     XCTAssertTrue(
       LivePassthroughRemoteControlConflict.isPresent {
-        ["/Applications/UURemote.app/Contents/MacOS/UURemoteDaemon"]
+        ["/Applications/UURemote.app/Contents/MacOS/UURemoteService"]
       }
     )
     XCTAssertFalse(
       LivePassthroughRemoteControlConflict.isPresent {
         ["/Applications/Safari.app/Contents/MacOS/Safari"]
       }
+    )
+  }
+
+  /// UU's LaunchDaemon stays resident even when nobody is remoting. Treating it as a
+  /// conflict forces 60Hz remote-compat polling forever and mid-drag selection hitch.
+  func testRemoteControlConflict_ignoresIdleUURemoteDaemon() {
+    XCTAssertNil(
+      LivePassthroughRemoteControlConflict.matchingMarker(
+        in: ["/Applications/UURemote.app/Contents/MacOS/UURemoteDaemon"]
+      )
+    )
+    XCTAssertFalse(
+      LivePassthroughRemoteControlConflict.isPresent {
+        ["/Applications/UURemote.app/Contents/MacOS/UURemoteDaemon"]
+      }
+    )
+  }
+
+  /// DingTalk itself is always resident; only the meeting helper (`Tblive`) fights
+  /// pointer delivery. Matching the main app would force remote-compat on every capture.
+  func testRemoteControlConflict_matchesDingTalkMeetingTblive_notMainApp() {
+    XCTAssertEqual(
+      LivePassthroughRemoteControlConflict.matchingMarker(
+        in: [
+          "/Applications/DingTalk.app/Contents/Frameworks/Tblive.app/Contents/MacOS/Tblive"
+        ]
+      ),
+      "Tblive.app/"
+    )
+    XCTAssertNil(
+      LivePassthroughRemoteControlConflict.matchingMarker(
+        in: ["/Applications/DingTalk.app/Contents/MacOS/DingTalk"]
+      )
     )
   }
 
@@ -340,6 +400,36 @@ final class LivePassthroughInputLogicTests: XCTestCase {
     XCTAssertFalse(
       LivePassthroughRemoteControlConflict.shouldHideSystemCursorDuringSelection(
         hasRemoteControlConflict: true
+      )
+    )
+  }
+
+  // MARK: - Remote-compat hover chrome gate
+
+  func testRemoteCompatHoverChrome_suppressedWhileDragging() {
+    XCTAssertFalse(
+      LivePassthroughInputLogic.shouldPublishRemoteCompatHoverChrome(
+        elapsed: 1,
+        interval: 1.0 / 60.0,
+        isDragging: true
+      )
+    )
+  }
+
+  func testRemoteCompatHoverChrome_gatedToDisplayRateWhenIdle() {
+    let interval = 1.0 / 60.0
+    XCTAssertFalse(
+      LivePassthroughInputLogic.shouldPublishRemoteCompatHoverChrome(
+        elapsed: interval * 0.5,
+        interval: interval,
+        isDragging: false
+      )
+    )
+    XCTAssertTrue(
+      LivePassthroughInputLogic.shouldPublishRemoteCompatHoverChrome(
+        elapsed: interval,
+        interval: interval,
+        isDragging: false
       )
     )
   }

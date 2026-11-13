@@ -18,14 +18,31 @@ enum LivePassthroughRemoteControlConflict {
     "/ToDesk",
     "SunloginClient",
     "/RustDesk",
+    // DingTalk meeting helper — hides/steals pointer events while Snapzy has hidden
+    // the system cursor, so selection looks frozen ("mouse can't move"). Match Tblive
+    // only; DingTalk.app itself stays resident for chat and must not force this path.
+    "Tblive.app/",
+  ]
+
+  /// UU installs a LaunchDaemon that keeps `UURemoteDaemon` alive forever. Matching that
+  /// path as a conflict forces remote-compat polling on every local capture and mid-drag
+  /// hitch. Ignore the idle daemon; session helpers under `UURemote.app/` still match.
+  /// ponytail: if active UU remote freezes selection again, add the session helper path
+  /// (not the daemon) to markers / an allowlist here.
+  static let ignoredPathMarkers: [String] = [
+    "UURemoteDaemon",
   ]
 
   /// Returns the first matching marker among `paths`, or `nil` when none conflict.
   static func matchingMarker(
     in paths: some Sequence<String>,
-    markers: [String] = conflictingPathMarkers
+    markers: [String] = conflictingPathMarkers,
+    ignoredMarkers: [String] = ignoredPathMarkers
   ) -> String? {
     for path in paths {
+      if ignoredMarkers.contains(where: { path.contains($0) }) {
+        continue
+      }
       for marker in markers where path.contains(marker) {
         return marker
       }

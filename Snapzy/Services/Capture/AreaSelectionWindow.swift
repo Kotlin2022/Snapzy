@@ -188,6 +188,12 @@ final class AreaSelectionController: NSObject {
   /// Uptime of the last hover UI update that actually ran; drives the display-rate gate.
   private var lastLivePassthroughHoverProcessTime: TimeInterval = 0
   private var lastProcessedLivePassthroughDisplayID: CGDirectDisplayID?
+  /// Manual-drag coalescing: keep only the latest dragged point and flush at display
+  /// rate. Per-event rect updates on a high-Hz mouse flood the main thread inside the
+  /// CGEventTap callback and trigger `tapDisabledByTimeout` (rect hitch → jump).
+  private var pendingLivePassthroughDragPoint: CGPoint?
+  private var isLivePassthroughDragUpdateScheduled = false
+  private var lastLivePassthroughDragProcessTime: TimeInterval = 0
   /// Uptime of the last overlay-event-driven inactive session recovery; drives the
   /// coalescing gate in `areaSelectionWindowDidRequestDisplayActivation`.
   private var lastEventDrivenSessionRecoveryTime: TimeInterval = 0
@@ -1671,7 +1677,15 @@ final class AreaSelectionController: NSObject {
     // see `BackgroundCursorControl`.)
     backgroundCursorControl.enableOnce()
     livePassthroughCursorHider.hide(displayIDs: Set(NSScreen.screens.compactMap(\.displayID)))
-    DiagnosticLogger.shared.log(.info, .capture, "Live passthrough input active")
+    DiagnosticLogger.shared.log(
+      .info,
+      .capture,
+      "Live passthrough input active",
+      context: [
+        "ui_interval_ms": String(format: "%.1f", Self.livePassthroughUIMinInterval * 1000),
+        "drag_coalesce": "true",
+      ]
+    )
   }
 
   /// Stop the event tap and restore the cursor (where the hide took effect). Called
@@ -1693,8 +1707,12 @@ final class AreaSelectionController: NSObject {
     isLivePassthroughInputActive = false
     hasRevealedLivePassthroughDim = false
     pendingLivePassthroughHoverPoint = nil
+    isLivePassthroughHoverUpdateScheduled = false
     lastProcessedLivePassthroughHoverPoint = nil
     lastProcessedLivePassthroughDisplayID = nil
+    pendingLivePassthroughDragPoint = nil
+    isLivePassthroughDragUpdateScheduled = false
+    lastLivePassthroughDragProcessTime = 0
     lastLivePassthroughPointerLocation = nil
     livePassthroughCursorHider.showAll()
   }
@@ -1739,9 +1757,9 @@ final class AreaSelectionController: NSObject {
     guard !isLivePassthroughHoverUpdateScheduled else { return }
 
     let now = ProcessInfo.processInfo.systemUptime
-    let interval = Self.livePassthroughHoverMinInterval
+    let interval = Self.livePassthroughUIMinInterval
     let elapsed = now - lastLivePassthroughHoverProcessTime
-    guard elapsed < interval else {
+    if LivePassthroughInputLogic.shouldFlushLeadingEdge(elapsed: elapsed, interval: interval) {
       flushLivePassthroughHover()
       return
     }
@@ -1763,16 +1781,83 @@ final class AreaSelectionController: NSObject {
     processLivePassthroughHover(at: point)
   }
 
-  /// Minimum spacing between hover UI updates. Follows the fastest display's refresh
-  /// rate so pointer-following chrome (crosshair proxy, size indicator, magnifier) can
-  /// land on every frame the screen can actually show — capping below the display rate
-  /// reads as a trailing crosshair on high-refresh screens, where the hidden system
-  /// cursor is replaced by this drawn proxy. A mouse reporting faster than the display
-  /// is still coalesced down to one update per frame. Only passive hover UI is gated;
-  /// the selection rect during a drag renders per event.
-  private static var livePassthroughHoverMinInterval: TimeInterval {
+  /// Coalesce live-passthrough drag samples the same way as hover: keep the latest
+  /// point and flush at display rate. Mouse-up always flushes first so the commit
+  /// rect matches the release position.
+  private func handleLivePassthroughDrag(at screenPoint: CGPoint) {
+    guard isPresenting, isLivePassthroughInputActive else { return }
+    pendingLivePassthroughDragPoint = screenPoint
+    guard !isLivePassthroughDragUpdateScheduled else { return }
+
+    let now = ProcessInfo.processInfo.systemUptime
+    let interval = Self.livePassthroughUIMinInterval
+    let elapsed = now - lastLivePassthroughDragProcessTime
+    if LivePassthroughInputLogic.shouldFlushLeadingEdge(elapsed: elapsed, interval: interval) {
+      flushLivePassthroughDrag()
+      return
+    }
+
+    isLivePassthroughDragUpdateScheduled = true
+    DispatchQueue.main.asyncAfter(deadline: .now() + (interval - elapsed)) { [weak self] in
+      MainActor.assumeIsolated {
+        guard let self else { return }
+        self.isLivePassthroughDragUpdateScheduled = false
+        self.flushLivePassthroughDrag()
+      }
+    }
+  }
+
+  private func flushLivePassthroughDrag() {
+    guard let point = pendingLivePassthroughDragPoint else { return }
+    pendingLivePassthroughDragPoint = nil
+    let now = ProcessInfo.processInfo.systemUptime
+    let interval = Self.livePassthroughUIMinInterval
+    let elapsed = lastLivePassthroughDragProcessTime > 0
+      ? now - lastLivePassthroughDragProcessTime
+      : 0
+    lastLivePassthroughDragProcessTime = now
+    if LivePassthroughInputLogic.isAnomalousPointerGap(elapsed: elapsed, interval: interval) {
+      DiagnosticLogger.shared.log(
+        .warning,
+        .capture,
+        "Live passthrough drag gap (selection hitch)",
+        context: [
+          "gap_ms": String(format: "%.1f", elapsed * 1000),
+          "interval_ms": String(format: "%.1f", interval * 1000),
+        ]
+      )
+    }
+    applyLivePassthroughDrag(at: point)
+  }
+
+  private func applyLivePassthroughDrag(at screenPoint: CGPoint) {
+    revealLivePassthroughDimIfNeeded()
+    switch interactionMode {
+    case .manualRegion:
+      if manualSelectionStartPoint != nil {
+        updateManualSelection(to: screenPoint)
+      } else {
+        // No drag committed yet: with window/element auto-detection on, `mouseDown` may
+        // have parked this as a pending click (`pendingWindowDetectionStartPoint`) instead
+        // of starting a selection, so `manualSelectionStartPoint` is still nil and
+        // `updateManualSelection` would silently no-op. Route to the source overlay, which
+        // tracks that pending state and promotes it to a real drag once the pointer clears
+        // the click/drag threshold.
+        window(containing: screenPoint)?.overlayView.handleLivePassthroughMouseDragged(atScreenPoint: screenPoint)
+      }
+    case .applicationWindow:
+      window(containing: screenPoint)?.overlayView.handleLivePassthroughMouseDragged(atScreenPoint: screenPoint)
+    }
+  }
+
+  /// Minimum spacing between pointer-following UI updates (hover chrome + drag rect).
+  /// Follows the fastest display's refresh rate so chrome can land on every frame the
+  /// screen can show — capping below the display rate reads as trailing UI on
+  /// high-refresh screens. A mouse reporting faster than the display is coalesced to
+  /// one update per frame (avoids CGEventTap timeouts from main-thread flood).
+  private static var livePassthroughUIMinInterval: TimeInterval {
     let fps = NSScreen.screens.map(\.maximumFramesPerSecond).max() ?? 60
-    return 1.0 / Double(max(fps, 1))
+    return LivePassthroughInputLogic.uiMinInterval(maxDisplayFPS: fps)
   }
 
   /// Minimum spacing between overlay-event-driven inactive session recoveries. The
@@ -1827,34 +1912,19 @@ final class AreaSelectionController: NSObject {
       }
       window.overlayView.handleLivePassthroughMouseDown(atScreenPoint: screenPoint)
     case .leftMouseDragged:
-      revealLivePassthroughDimIfNeeded()
-      switch interactionMode {
-      case .manualRegion:
-        if manualSelectionStartPoint != nil {
-          // Already a committed drag — same path the global drag monitors use: global
-          // coordinates, works across displays.
-          updateManualSelection(to: screenPoint)
-        } else {
-          // No drag committed yet: with window/element auto-detection on, `mouseDown` may
-          // have parked this as a pending click (`pendingWindowDetectionStartPoint`) instead
-          // of starting a selection, so `manualSelectionStartPoint` is still nil and
-          // `updateManualSelection` would silently no-op. Route to the source overlay, which
-          // tracks that pending state and promotes it to a real drag once the pointer clears
-          // the click/drag threshold.
-          window(containing: screenPoint)?.overlayView.handleLivePassthroughMouseDragged(atScreenPoint: screenPoint)
-        }
-      case .applicationWindow:
-        window(containing: screenPoint)?.overlayView.handleLivePassthroughMouseDragged(atScreenPoint: screenPoint)
-      }
+      handleLivePassthroughDrag(at: screenPoint)
     case .leftMouseUp:
+      // Commit the latest coalesced drag sample before mouse-up so the final rect
+      // matches the release point even if a trailing flush was still pending.
+      flushLivePassthroughDrag()
       switch interactionMode {
       case .manualRegion:
         if manualSelectionStartPoint != nil {
           endManualSelection(at: screenPoint)
         } else {
-          // Mirrors the `leftMouseDragged` case above: no drag ever committed, so resolve the
-          // release as a click on whatever the source overlay was hovering (a window, or with
-          // element detection on, a finer AX element) instead of letting `endManualSelection`
+          // Mirrors the drag path: no drag ever committed, so resolve the release as a
+          // click on whatever the source overlay was hovering (a window, or with element
+          // detection on, a finer AX element) instead of letting `endManualSelection`
           // no-op the release into nothing.
           window(containing: screenPoint)?.overlayView.handleLivePassthroughMouseUp(atScreenPoint: screenPoint)
         }

@@ -17,6 +17,7 @@ struct AdvancedSettingsView: View {
   @State private var needsConfigAccess = SnapzyConfigurationService.shared.needsUserSelectedConfigAccess
   @State private var isRestoreConfirmationPresented = false
   @State private var isConfigSyncConfirmationPresented = false
+  @State private var isClearLogsConfirmationPresented = false
   @State private var pendingConfigSyncURL: URL?
   @State private var pendingConfigSyncSignature: String?
   @State private var logSizeText = L10n.PreferencesAdvanced.calculating
@@ -153,6 +154,7 @@ struct AdvancedSettingsView: View {
             .labelsHidden()
           }
           .frame(width: 120, alignment: .trailing)
+          .disabled(!diagnosticsEnabled)
         }
 
         SettingRow(icon: "folder", title: L10n.PreferencesAdvanced.logFilesTitle, description: logSizeText) {
@@ -162,11 +164,44 @@ struct AdvancedSettingsView: View {
           .buttonStyle(.bordered)
           .controlSize(.small)
         }
+
+        SettingRow(
+          icon: "trash",
+          title: L10n.PreferencesAdvanced.clearLogsTitle,
+          description: L10n.PreferencesAdvanced.clearLogsDescription
+        ) {
+          Button(L10n.PreferencesAdvanced.clearLogsButton, role: .destructive) {
+            isClearLogsConfirmationPresented = true
+          }
+          .buttonStyle(.bordered)
+          .controlSize(.small)
+        }
+
+        SettingRow(
+          icon: "square.and.arrow.up.on.square",
+          title: L10n.PreferencesAdvanced.exportLogsTitle,
+          description: L10n.PreferencesAdvanced.exportLogsDescription
+        ) {
+          Button(L10n.PreferencesAdvanced.exportLogsButton) {
+            exportDiagnosticLogs()
+          }
+          .buttonStyle(.borderedProminent)
+          .controlSize(.small)
+        }
       }
     }
     .formStyle(.grouped)
     .onAppear {
       refreshConfigAccessState()
+      updateLogSize()
+    }
+    .onChange(of: diagnosticsEnabled) { enabled in
+      if enabled {
+        DiagnosticLogger.shared.startSession()
+      } else {
+        // Close file handles immediately — no further writes while the toggle is off.
+        DiagnosticLogger.shared.closeHandles()
+      }
       updateLogSize()
     }
     .onChange(of: diagnosticsRetentionDays) { _ in
@@ -183,6 +218,17 @@ struct AdvancedSettingsView: View {
       }
     } message: {
       Text(L10n.PreferencesAdvanced.restoreDefaultsConfirmationMessage)
+    }
+    .alert(
+      L10n.PreferencesAdvanced.clearLogsConfirmationTitle,
+      isPresented: $isClearLogsConfirmationPresented
+    ) {
+      Button(L10n.Common.cancel, role: .cancel) {}
+      Button(L10n.PreferencesAdvanced.clearLogsConfirmButton, role: .destructive) {
+        clearDiagnosticLogs()
+      }
+    } message: {
+      Text(L10n.PreferencesAdvanced.clearLogsConfirmationMessage)
     }
     .alert(
       L10n.PreferencesAdvanced.configSyncConfirmationTitle,
@@ -493,22 +539,80 @@ struct AdvancedSettingsView: View {
   private func revealLogFolder() {
     let logDir = DiagnosticLogger.shared.logDirectoryURL
     let fm = FileManager.default
+    // Do not create the log directory while logging is off — that would look like
+    // "writing" after the user disabled diagnostics.
     if !fm.fileExists(atPath: logDir.path) {
-      try? fm.createDirectory(at: logDir, withIntermediateDirectories: true)
+      if diagnosticsEnabled {
+        try? fm.createDirectory(at: logDir, withIntermediateDirectories: true)
+      } else {
+        showNotice(L10n.PreferencesAdvanced.noLogs, style: .warning)
+        return
+      }
     }
     NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: logDir.path)
   }
 
-  private func updateLogSize() {
-    let logDir = DiagnosticLogger.shared.logDirectoryURL
-    let fm = FileManager.default
-    guard let files = try? fm.contentsOfDirectory(atPath: logDir.path) else {
-      logSizeText = L10n.PreferencesAdvanced.noLogs
+  private func clearDiagnosticLogs() {
+    let deleted = DiagnosticLogger.shared.clearAllLogFiles()
+    updateLogSize()
+    if deleted == 0 {
+      showNotice(L10n.PreferencesAdvanced.clearLogsAlreadyEmpty, style: .warning)
       return
     }
-    let totalBytes = files.compactMap { file -> Int? in
-      let path = logDir.appendingPathComponent(file).path
-      return (try? fm.attributesOfItem(atPath: path))?[.size] as? Int
+    if diagnosticsEnabled {
+      DiagnosticLogger.shared.startSession()
+    }
+    showNotice(L10n.PreferencesAdvanced.clearLogsSucceeded, style: .success)
+  }
+
+  private func exportDiagnosticLogs() {
+    DiagnosticLogger.shared.closeHandles()
+
+    let logDir = DiagnosticLogger.shared.logDirectoryURL
+    let hasLogs = DiagnosticLogger.diagnosticLogFileURLs(in: logDir).isEmpty == false
+    guard hasLogs else {
+      showNotice(
+        diagnosticsEnabled
+          ? L10n.PreferencesAdvanced.noLogs
+          : L10n.PreferencesAdvanced.exportLogsDisabled,
+        style: .warning
+      )
+      return
+    }
+
+    do {
+      let archiveURL = try ProblemReportLogArchive.makeArchive(
+        from: logDir,
+        reportURL: CrashReportService.bugReportURL
+      )
+
+      let panel = NSSavePanel()
+      panel.title = L10n.PreferencesAdvanced.exportLogsPanelTitle
+      panel.nameFieldStringValue = archiveURL.lastPathComponent
+      panel.canCreateDirectories = true
+      panel.allowedContentTypes = [.zip]
+
+      guard panel.runModal() == .OK, let destination = panel.url else { return }
+
+      let fm = FileManager.default
+      if fm.fileExists(atPath: destination.path) {
+        try fm.removeItem(at: destination)
+      }
+      try fm.copyItem(at: archiveURL, to: destination)
+      NSWorkspace.shared.activateFileViewerSelecting([destination])
+      showNotice(L10n.PreferencesAdvanced.exportLogsSucceeded, style: .success)
+      updateLogSize()
+    } catch {
+      DiagnosticLogger.shared.logError(.preferences, error, "Export diagnostic logs failed")
+      showNotice(error.localizedDescription, fallback: L10n.PreferencesAdvanced.exportLogsFailed, style: .error)
+    }
+  }
+
+  private func updateLogSize() {
+    let logDir = DiagnosticLogger.shared.logDirectoryURL
+    let files = DiagnosticLogger.diagnosticLogFileURLs(in: logDir)
+    let totalBytes = files.compactMap { url -> Int? in
+      (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int
     }.reduce(0, +)
 
     if totalBytes == 0 {

@@ -30,6 +30,10 @@ struct SnapzyApp: App {
       PreferencesView()
         .preferredColorScheme(themeManager.systemAppearance)
     }
+    // Content defines the floor; AppStatusBarController also forces `.resizable`
+    // on the live NSWindow because Settings sometimes pins maxSize == frame.
+    .defaultSize(width: 760, height: 550)
+    .windowResizability(.contentMinSize)
   }
 }
 

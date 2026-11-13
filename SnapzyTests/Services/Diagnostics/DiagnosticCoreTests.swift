@@ -67,4 +67,24 @@ final class DiagnosticCoreTests: XCTestCase {
     XCTAssertNil(DiagnosticLogEntry.parseTimestamp(from: "12:34:56][INF]", referenceDate: Date()))
     XCTAssertNil(DiagnosticLogEntry.parseTimestamp(from: "[not-time][INF]", referenceDate: Date()))
   }
+
+  func testDiagnosticLogFileURLs_keepsOnlySnapzyTxt() throws {
+    let fm = FileManager.default
+    let tempRoot = fm.temporaryDirectory.appendingPathComponent(
+      "snapzy-clear-logs-\(UUID().uuidString)",
+      isDirectory: true
+    )
+    try fm.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+    defer { try? fm.removeItem(at: tempRoot) }
+
+    let keep = tempRoot.appendingPathComponent("notes.txt")
+    let killA = tempRoot.appendingPathComponent("snapzy_2026-01-01.txt")
+    let killB = tempRoot.appendingPathComponent("snapzy_2026-01-02.txt")
+    try Data("keep".utf8).write(to: keep)
+    try Data("a".utf8).write(to: killA)
+    try Data("b".utf8).write(to: killB)
+
+    let urls = DiagnosticLogger.diagnosticLogFileURLs(in: tempRoot)
+    XCTAssertEqual(Set(urls.map(\.lastPathComponent)), ["snapzy_2026-01-01.txt", "snapzy_2026-01-02.txt"])
+  }
 }
