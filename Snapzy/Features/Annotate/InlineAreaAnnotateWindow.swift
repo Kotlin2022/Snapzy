@@ -244,25 +244,25 @@ private struct InlineAreaAnnotateRootView: View {
       let isSelectionPreviewing = resizePreviewRect != nil || movingPreviewRect != nil
       let showsCursorIndicator = movingPreviewRect != nil
       // Pointer position for the drawn crosshair / magnifier during `.selecting`. Prefer the
-      // session-published desktop point, which the drag local monitor keeps fresh while it
-      // consumes `.leftMouseDragged` (starving the SwiftUI gesture that feeds
-      // `cursorIndicatorPoint`) — otherwise this chrome freezes at the drag-start point.
-      // Gated to this display's bounds: each per-display panel only renders the pointer
-      // chrome while the pointer is actually on that display.
+      // session-published desktop point (fed by the 60Hz mouseLocation poll + drag path) —
+      // SwiftUI hover starves once the system cursor is hidden, especially on trackpads.
+      // Fall back to local gesture state. Gated to this display's bounds.
       let viewportBounds = CGRect(origin: .zero, size: display.localFrame.size)
-      let selectingPointerPoint = (session.selectionPointerLocation.map(viewportPoint(for:)) ?? cursorIndicatorPoint)
-        .flatMap { viewportBounds.contains($0) ? $0 : nil }
+      let selectingPointerPoint = (
+        session.selectionPointerLocation.map(viewportPoint(for:))
+          ?? cursorIndicatorPoint
+      )
+      .flatMap { viewportBounds.contains($0) ? $0 : nil }
 
       ZStack(alignment: .topLeading) {
-        ForEach(session.displays) { backdropDisplay in
-          Image(nsImage: backdropDisplay.backdropImage)
-            .resizable()
-            .frame(width: backdropDisplay.localFrame.width, height: backdropDisplay.localFrame.height)
-            .position(
-              x: backdropDisplay.localFrame.midX - display.localFrame.minX,
-              y: backdropDisplay.localFrame.midY - display.localFrame.minY
-            )
-        }
+        // Backdrops are immutable for the session. Keep them behind an Equatable gate so
+        // selection/pointer `@Published` churn does not rebuild dual-display full-screen
+        // `Image(nsImage:)` layers every hover/drag tick (selection hitch / dropped frames).
+        InlineAreaStaticBackdrops(
+          displays: session.displays,
+          hostLocalFrame: display.localFrame
+        )
+        .equatable()
 
         selectionDimLayer(size: geometry.size, rect: viewportRect)
 
@@ -318,18 +318,18 @@ private struct InlineAreaAnnotateRootView: View {
         switch phase {
         case let .active(location):
           cursorIndicatorPoint = location
-          if session.phase == .selecting {
-            session.selectionPointerLocation = desktopPoint(for: location)
-          }
           updateNativeCursorForIndicator(showsCursorIndicator)
           if session.phase == .selecting {
-            session.updateHoveredWindow(atScreenPoint: screenPoint(fromDesktopPoint: desktopPoint(for: location)))
+            let desktop = desktopPoint(for: location)
+            session.updateSelectingHover(
+              desktopPoint: desktop,
+              screenPoint: screenPoint(fromDesktopPoint: desktop)
+            )
           }
         case .ended:
           cursorIndicatorPoint = nil
-          if session.phase == .selecting {
-            session.selectionPointerLocation = nil
-          }
+          // Keep session.selectionPointerLocation — the mouseLocation poll owns crosshair
+          // chrome while the system cursor is hidden; clearing it freezes the proxy.
           InlineAreaNativeCursor.restoreArrow()
           session.hoveredWindowCandidate = nil
           session.hoveredSmartElementRect = nil
@@ -350,8 +350,11 @@ private struct InlineAreaAnnotateRootView: View {
         && (0 ... display.localFrame.height).contains(candidate.y)
       if inBounds {
         cursorIndicatorPoint = candidate
-        session.selectionPointerLocation = desktopPoint(for: candidate)
-        session.updateHoveredWindow(atScreenPoint: screenPoint(fromDesktopPoint: session.currentDesktopMouseLocation))
+        let desktop = desktopPoint(for: candidate)
+        session.publishPolledSelectingPointer(
+          desktopPoint: desktop,
+          screenPoint: screenPoint(fromDesktopPoint: session.currentDesktopMouseLocation)
+        )
       }
     }
   }
@@ -734,6 +737,43 @@ private struct InlineAreaAnnotateRootView: View {
     } else {
       InlineAreaNativeCursor.restoreArrow()
     }
+  }
+}
+
+/// Immutable dual-display backdrop stack for inline area selection. Equatable so SwiftUI can
+/// skip rebuilding full-screen `Image(nsImage:)` layers when only selection chrome changes.
+///
+/// Must report the **host panel** size — not the union of positioned desktop images. Without
+/// that frame, each panel's ZStack expands to the full multi-display desktop, which reads as
+/// overlapping/zoomed screens and starves hover hit-testing (hidden cursor looks frozen).
+struct InlineAreaStaticBackdrops: View, Equatable {
+  let displays: [InlineAreaAnnotateDisplay]
+  let hostLocalFrame: CGRect
+
+  static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.hostLocalFrame == rhs.hostLocalFrame
+      && lhs.displays.count == rhs.displays.count
+      && zip(lhs.displays, rhs.displays).allSatisfy { left, right in
+        left.displayID == right.displayID
+          && left.localFrame == right.localFrame
+          && left.backdropImage === right.backdropImage
+      }
+  }
+
+  var body: some View {
+    ZStack(alignment: .topLeading) {
+      ForEach(displays) { backdropDisplay in
+        Image(nsImage: backdropDisplay.backdropImage)
+          .resizable()
+          .frame(width: backdropDisplay.localFrame.width, height: backdropDisplay.localFrame.height)
+          .position(
+            x: backdropDisplay.localFrame.midX - hostLocalFrame.minX,
+            y: backdropDisplay.localFrame.midY - hostLocalFrame.minY
+          )
+      }
+    }
+    .frame(width: hostLocalFrame.width, height: hostLocalFrame.height)
+    .clipped()
   }
 }
 

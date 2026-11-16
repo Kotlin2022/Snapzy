@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Bug Fixes
 
 - 修复开启 UU 远程等远程控制工具时，区域截图 / 区域标注准星不移动、像卡住的问题：检测远程助手进程后跳过 Live Passthrough 吞事件与藏光标，改为轮询系统指针位置（详见 `docs/REMOTE_CONTROL_COMPAT.md`）
+- 修复区域标注（Capture Markup）选区卡顿 / 触控板准星不跟手：双屏 backdrop 用 equatable 层并锁定面板尺寸避免每帧重建与画面重合；选择阶段始终轮询 `mouseLocation` 驱动绘制准星（藏系统光标后 SwiftUI hover 会断更）
 
 ## [1.32.0-beta.9] - 2026-09-09
 

@@ -22,14 +22,27 @@
 见 `LivePassthroughRemoteControlConflict`）时，跳过 Live Passthrough，改用窗口事件 /
 指针轮询。
 
-### 2. 区域标注藏光标 + SwiftUI 悬停
+### 2. 区域标注藏光标 + SwiftUI 悬停（本地触控板也会中招）
 
-区域标注会冻结画面、隐藏系统光标，并用 SwiftUI 的 `onContinuousHover` / `DragGesture`
-绘制准星。远程注入经常只改系统指针位置、不投递这些 AppKit/SwiftUI 事件，导致
-准星冻住且真光标被藏起。
+区域标注会冻结画面、隐藏系统光标，并用绘制准星代替真光标。
+`onContinuousHover` / `DragGesture` **不能**单独当准星数据源：
 
-**处理：** 同一冲突检测下，保留系统光标，并以约 60fps 轮询 `NSEvent.mouseLocation` /
-`pressedMouseButtons` 驱动准星与选区（`InlineAreaAnnotateSession`）。
+- **远程：** 注入经常只改系统指针位置、不投递 AppKit/SwiftUI 事件 → 准星冻住且真光标被藏起。
+- **本地：** 藏光标后触控板滑动时 hover 也常断更 → 同样「触控板在动、准星不动」。
+
+**处理（`InlineAreaAnnotateSession`）：**
+
+- 选择阶段**始终**约 60fps 轮询 `NSEvent.mouseLocation` 驱动 `selectionPointerLocation`（绘制准星）。
+- 远程冲突时额外轮询 `pressedMouseButtons` 合成按/拖/松，并保留系统光标（不藏）。
+- 拖拽中的选区矩形仍走显示刷新率合并，避免双屏全屏 backdrop 每事件重建。
+
+### 2b. 双屏区域标注 hitch / 画面重合（性能修复回归）
+
+曾把双屏 backdrop 抽成 `.equatable()` 子视图以降低拖拽 hitch，但子视图未锁成
+**当前屏幕面板尺寸**，SwiftUI 按整桌面理想尺寸排版 → 双屏重合/局部放大，hover 命中也乱。
+
+**处理：** `InlineAreaStaticBackdrops` 必须 `.frame(hostLocalFrame.size).clipped()`，
+equality 只比较 displayID / localFrame / NSImage 身份。
 
 ### 3. 本机安装签名与 TCC
 
@@ -50,7 +63,8 @@ Ad-hoc 重签会改变 code directory hash。系统设置里旧身份的「屏�
 | `LivePassthroughRemoteControlConflict` | 通过 `proc_pidpath` 检测远程助手 |
 | `LivePassthroughInputLogic.shouldUseLivePassthroughInput` | 是否启用 Live tap |
 | `AreaSelectionController` 远程兼容轮询 | 普通区域选区 |
-| `InlineAreaAnnotateSession` 远程兼容轮询 | 区域标注选择阶段 |
+| `InlineAreaAnnotateSession` 选区指针轮询 | 区域标注选择阶段（本地藏光标 + 远程按钮合成） |
+| `InlineAreaStaticBackdrops` | 双屏冻结背景 equatable 层（须锁定 host 面板尺寸） |
 
 ## 验证
 

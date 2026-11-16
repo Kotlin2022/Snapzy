@@ -382,8 +382,8 @@ final class InlineAreaAnnotateSessionTests: XCTestCase {
   /// Regression: during a drag, the session's local monitor consumes `.leftMouseDragged`
   /// before SwiftUI's gesture sees it, so mid-drag pointer updates arrive ONLY through
   /// these session calls. Pointer-positioned chrome (drawn crosshair, magnifier) reads
-  /// `selectionPointerLocation` — it must track every `updateSelection` call or the
-  /// crosshair freezes at the drag-start point (⌘⇧7 stuck-crosshair bug).
+  /// `selectionPointerLocation` — it must track drag updates (display-rate coalesced) or
+  /// the crosshair freezes at the drag-start point (⌘⇧7 stuck-crosshair bug).
   @MainActor
   func testUpdateSelectionPublishesPointerLocation() throws {
     let session = try makeSelectionSession()
@@ -391,6 +391,9 @@ final class InlineAreaAnnotateSessionTests: XCTestCase {
     XCTAssertEqual(session.selectionPointerLocation, CGPoint(x: 100, y: 100))
 
     for point in [CGPoint(x: 150, y: 180), CGPoint(x: 400, y: 500), CGPoint(x: 60, y: 40)] {
+      // Drag chrome is coalesced to display rate — advance past one frame so each
+      // update takes the leading-edge flush path instead of a trailing asyncAfter.
+      RunLoop.main.run(until: Date().addingTimeInterval(0.02))
       session.updateSelection(to: point)
       XCTAssertEqual(session.selectionPointerLocation, point)
     }
@@ -408,6 +411,92 @@ final class InlineAreaAnnotateSessionTests: XCTestCase {
     XCTAssertNil(session.selectionPointerLocation)
     XCTAssertNil(session.selectionRect)
     XCTAssertEqual(session.phase, .selecting)
+  }
+
+  /// Hidden-cursor selecting polls `mouseLocation` for the drawn crosshair — hover alone
+  /// freezes on trackpads. Publish is display-rate gated.
+  @MainActor
+  func testPolledSelectingPointer_publishesAtDisplayRate() throws {
+    let session = try makeSelectionSession()
+    let first = CGPoint(x: 10, y: 10)
+    session.publishPolledSelectingPointer(
+      desktopPoint: first,
+      screenPoint: CGPoint(x: 10, y: 590)
+    )
+    XCTAssertEqual(session.selectionPointerLocation, first)
+
+    session.publishPolledSelectingPointer(desktopPoint: CGPoint(x: 20, y: 20), screenPoint: .zero)
+    XCTAssertEqual(
+      session.selectionPointerLocation,
+      first,
+      "Intra-frame poll must not republish @Published chrome"
+    )
+
+    RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+    let last = CGPoint(x: 40, y: 40)
+    session.publishPolledSelectingPointer(desktopPoint: last, screenPoint: .zero)
+    XCTAssertEqual(session.selectionPointerLocation, last)
+    session.cancel()
+  }
+
+  /// Once a drag starts, the poll must not overwrite drag-owned pointer chrome.
+  @MainActor
+  func testPolledSelectingPointer_ignoredWhileDragging() throws {
+    let session = try makeSelectionSession()
+    session.beginSelection(at: CGPoint(x: 100, y: 100))
+    XCTAssertEqual(session.selectionPointerLocation, CGPoint(x: 100, y: 100))
+
+    session.publishPolledSelectingPointer(
+      desktopPoint: CGPoint(x: 999, y: 999),
+      screenPoint: CGPoint(x: 999, y: 999)
+    )
+    XCTAssertEqual(session.selectionPointerLocation, CGPoint(x: 100, y: 100))
+    session.cancel()
+  }
+
+  /// Static dual-display backdrops must compare equal across selection-chrome-only changes
+  /// so `.equatable()` can skip rebuilding full-screen `Image(nsImage:)` layers.
+  func testStaticBackdrops_equalWhenOnlyHostChromeWouldChange() throws {
+    let image = try XCTUnwrap(TestImageFactory.solidColor(
+      width: 100, height: 80, red: 10, green: 20, blue: 30
+    ))
+    let nsImage = NSImage(cgImage: image, size: CGSize(width: 50, height: 40))
+    let displays = [
+      InlineAreaAnnotateDisplay(
+        displayID: 1,
+        screenFrame: CGRect(x: 0, y: 0, width: 50, height: 40),
+        localFrame: CGRect(x: 0, y: 0, width: 50, height: 40),
+        controlInsets: .zero,
+        backdropImage: nsImage,
+        backdropCGImage: image
+      ),
+      InlineAreaAnnotateDisplay(
+        displayID: 2,
+        screenFrame: CGRect(x: 50, y: 0, width: 50, height: 40),
+        localFrame: CGRect(x: 50, y: 0, width: 50, height: 40),
+        controlInsets: .zero,
+        backdropImage: nsImage,
+        backdropCGImage: image
+      ),
+    ]
+    let host = CGRect(x: 0, y: 0, width: 50, height: 40)
+    let left = InlineAreaStaticBackdrops(displays: displays, hostLocalFrame: host)
+    let right = InlineAreaStaticBackdrops(displays: displays, hostLocalFrame: host)
+    XCTAssertEqual(left, right)
+    XCTAssertNotEqual(
+      left,
+      InlineAreaStaticBackdrops(
+        displays: displays,
+        hostLocalFrame: host.offsetBy(dx: 1, dy: 0)
+      )
+    )
+    // Host frame is the layout contract — must stay the panel size, not the desktop union
+    // (missing frame made dual-display panels look overlapped/zoomed).
+    XCTAssertEqual(left.hostLocalFrame.size, CGSize(width: 50, height: 40))
+    XCTAssertLessThan(
+      left.hostLocalFrame.width,
+      displays.map(\.localFrame.maxX).max() ?? 0
+    )
   }
 
   @MainActor

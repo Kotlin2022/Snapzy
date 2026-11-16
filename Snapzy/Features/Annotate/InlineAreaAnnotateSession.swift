@@ -118,16 +118,17 @@ final class InlineAreaAnnotateSession: ObservableObject {
   /// `NSApp.activate` at start, so — unlike live-passthrough capture — this doesn't need
   /// `BackgroundCursorControl`'s background-cursor-control workaround.
   ///
-  /// Remote-control agents (UU Remote, etc.) are the exception: they often move the pointer
-  /// without delivering SwiftUI hover/drag events, so hiding the cursor + relying on those
-  /// events freezes the drawn crosshair. Skip the hide and poll `NSEvent.mouseLocation`
-  /// instead (`startRemoteCompatPointerPollingIfNeeded`).
+  /// Drawn crosshair must not rely on SwiftUI `onContinuousHover` alone: hiding the system
+  /// cursor (local) or remote agents injecting motion (UU/…) both starve hover events, so the
+  /// proxy freezes while the trackpad still moves. Poll `NSEvent.mouseLocation` instead.
   private var cursorHider = LivePassthroughCursorHider()
   private let hidesSystemCursorDuringSelection: Bool
-  private var remoteCompatPointerTimer: Timer?
+  /// When true, the poll also synthesizes press/drag/release (remote agents skip AppKit).
+  private let pollsRemoteButtonState: Bool
+  private var selectingPointerTimer: Timer?
   private var remoteCompatLeftWasPressed = false
-  /// Display-rate coalescing for remote-compat hover chrome (pointer + window hit-test).
-  private var lastRemoteCompatHoverProcessTime: TimeInterval = 0
+  /// Display-rate coalescing for polled pointer chrome (pointer + window hit-test).
+  private var lastSelectingPointerProcessTime: TimeInterval = 0
   /// Display-rate coalescing for manual-drag rect + pointer chrome. High-Hz mice otherwise
   /// republish two `@Published` fields (and rebuild dual-display SwiftUI backdrops + magnifier)
   /// per event — main-thread stalls read as mid-drag hitch / dropped frames.
@@ -170,6 +171,7 @@ final class InlineAreaAnnotateSession: ObservableObject {
     let remoteConflict = LivePassthroughRemoteControlConflict.isPresent()
     hidesSystemCursorDuringSelection = LivePassthroughRemoteControlConflict
       .shouldHideSystemCursorDuringSelection(hasRemoteControlConflict: remoteConflict)
+    pollsRemoteButtonState = remoteConflict
     self.stateChangeCancellable = state.objectWillChange.sink { [weak self] _ in
       Task { @MainActor in
         self?.objectWillChange.send()
@@ -177,7 +179,9 @@ final class InlineAreaAnnotateSession: ObservableObject {
     }
     // Session always starts in `.selecting` — hide the real cursor for every display up
     // front (unless a remote-control agent is fighting event delivery); `beginAnnotating(with:)`
-    // shows it again once selection ends.
+    // shows it again once selection ends. Always poll pointer location: hidden-cursor sessions
+    // starve SwiftUI hover (trackpad moves, frozen crosshair), and remote agents need the
+    // same poll plus button-state synthesis.
     if hidesSystemCursorDuringSelection {
       cursorHider.hide(displayIDs: Set(displays.map(\.displayID)))
     } else {
@@ -186,8 +190,8 @@ final class InlineAreaAnnotateSession: ObservableObject {
         .capture,
         "Inline area annotate: remote-control agent conflict — keeping system cursor, polling pointer"
       )
-      startRemoteCompatPointerPollingIfNeeded()
     }
+    startSelectingPointerPollingIfNeeded()
     startWindowSelectionQuery(prefetchedContentTask: prefetchedContentTask, excludeOwnApplication: excludeOwnApplication)
     if autoDetectElementUnderCursor {
       SmartElementQueryService.shared.ensureAccessibilityPermission()
@@ -200,50 +204,89 @@ final class InlineAreaAnnotateSession: ObservableObject {
     SmartElementQueryService.shared.cancelPendingQueries()
   }
 
-  /// Poll system pointer position while selecting under a remote-control agent.
-  /// SwiftUI hover/drag often starve when UU (etc.) injects motion without AppKit hover
-  /// events — keep `selectionPointerLocation` fresh and drive press/drag/release from
-  /// `NSEvent.pressedMouseButtons` so the crosshair and selection rect still move.
-  private func startRemoteCompatPointerPollingIfNeeded() {
-    guard remoteCompatPointerTimer == nil else { return }
+  /// Poll system pointer while selecting. Local hidden-cursor sessions need position so the
+  /// drawn crosshair tracks the trackpad; remote-compat also synthesizes press/drag/release.
+  private func startSelectingPointerPollingIfNeeded() {
+    guard selectingPointerTimer == nil else { return }
+    #if DEBUG
+      // Unit tests drive `publishPolledSelectingPointer` directly — a live mouseLocation
+      // timer would overwrite their fixtures on every RunLoop pass.
+      if NSClassFromString("XCTestCase") != nil { return }
+    #endif
     let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
       MainActor.assumeIsolated {
-        self?.handleRemoteCompatPointerTick()
+        self?.handleSelectingPointerTick()
       }
     }
     RunLoop.main.add(timer, forMode: .common)
-    remoteCompatPointerTimer = timer
+    selectingPointerTimer = timer
   }
 
-  private func stopRemoteCompatPointerPolling() {
-    remoteCompatPointerTimer?.invalidate()
-    remoteCompatPointerTimer = nil
+  private func stopSelectingPointerPolling() {
+    selectingPointerTimer?.invalidate()
+    selectingPointerTimer = nil
     remoteCompatLeftWasPressed = false
-    lastRemoteCompatHoverProcessTime = 0
+    lastSelectingPointerProcessTime = 0
     pendingSelectionDragPoint = nil
     isSelectionDragUpdateScheduled = false
     lastSelectionDragProcessTime = 0
   }
 
-  private func handleRemoteCompatPointerTick() {
+  /// Window-hover hit-test from SwiftUI hover. Pointer chrome is owned by the poll timer
+  /// while the system cursor is hidden — do not clear `selectionPointerLocation` here.
+  func updateSelectingHover(desktopPoint _: CGPoint, screenPoint: CGPoint) {
+    guard phase == .selecting, !didComplete else { return }
+    guard selectionStartPoint == nil else { return }
+    updateHoveredWindow(atScreenPoint: screenPoint)
+  }
+
+  private func handleSelectingPointerTick() {
     guard phase == .selecting, !didComplete else { return }
     let screenPoint = NSEvent.mouseLocation
     let desktopPoint = localDesktopPoint(for: screenPoint)
 
-    // Button-state polling backs SwiftUI gestures when remote injection skips AppKit
-    // mouse-dragged delivery — same symptom as the frozen crosshair.
+    if pollsRemoteButtonState {
+      handleRemoteCompatButtons(
+        desktopPoint: desktopPoint,
+        screenPoint: screenPoint
+      )
+      return
+    }
+
+    // Local: drag already publishes pointer via `updateSelection`; idle hover must follow
+    // `mouseLocation` because hidden-cursor sessions starve `onContinuousHover`.
+    guard selectionStartPoint == nil else { return }
+    publishPolledSelectingPointer(desktopPoint: desktopPoint, screenPoint: screenPoint)
+  }
+
+  /// Testable seam for the local pointer-poll publish path.
+  func publishPolledSelectingPointer(desktopPoint: CGPoint, screenPoint: CGPoint) {
+    guard phase == .selecting, selectionStartPoint == nil else { return }
+    let now = ProcessInfo.processInfo.systemUptime
+    let interval = Self.selectionDragUIMinInterval
+    let elapsed = lastSelectingPointerProcessTime > 0
+      ? now - lastSelectingPointerProcessTime
+      : .greatestFiniteMagnitude
+    guard LivePassthroughInputLogic.shouldFlushLeadingEdge(elapsed: elapsed, interval: interval)
+    else { return }
+    lastSelectingPointerProcessTime = now
+    selectionPointerLocation = desktopPoint
+    updateHoveredWindow(atScreenPoint: screenPoint)
+  }
+
+  private func handleRemoteCompatButtons(desktopPoint: CGPoint, screenPoint: CGPoint) {
     let leftPressed = NSEvent.pressedMouseButtons & (1 << 0) != 0
     let isDragging = leftPressed && selectionStartPoint != nil
     let now = ProcessInfo.processInfo.systemUptime
-    let hoverElapsed = lastRemoteCompatHoverProcessTime > 0
-      ? now - lastRemoteCompatHoverProcessTime
+    let hoverElapsed = lastSelectingPointerProcessTime > 0
+      ? now - lastSelectingPointerProcessTime
       : .greatestFiniteMagnitude
     if LivePassthroughInputLogic.shouldPublishRemoteCompatHoverChrome(
       elapsed: hoverElapsed,
       interval: Self.selectionDragUIMinInterval,
       isDragging: isDragging
     ) {
-      lastRemoteCompatHoverProcessTime = now
+      lastSelectingPointerProcessTime = now
       selectionPointerLocation = desktopPoint
       updateHoveredWindow(atScreenPoint: screenPoint)
     }
@@ -424,6 +467,7 @@ final class InlineAreaAnnotateSession: ObservableObject {
     selectionStartPoint = nil
     selectionPointerLocation = nil
     lastSelectionDragProcessTime = 0
+    lastSelectingPointerProcessTime = 0
 
     guard let rect = selectionRect, rect.width > 5, rect.height > 5 else {
       selectionRect = nil
@@ -482,7 +526,7 @@ final class InlineAreaAnnotateSession: ObservableObject {
     state.loadImage(crop.image, url: nil)
     state.selectedTool = AnnotateToolPreference.initialTool(userDefaults: defaults)
     phase = .annotating
-    stopRemoteCompatPointerPolling()
+    stopSelectingPointerPolling()
     cursorHider.showAll()
   }
 
@@ -841,7 +885,7 @@ final class InlineAreaAnnotateSession: ObservableObject {
     selectionPointerLocation = nil
     removeKeyMonitors()
     removeSelectionMonitor()
-    stopRemoteCompatPointerPolling()
+    stopSelectingPointerPolling()
     frozenSession.invalidate()
 
     // Restore cursor before closing windows — the inline overlay uses a
